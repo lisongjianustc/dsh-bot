@@ -5,7 +5,7 @@
 
 ## 0. 两个前置条件（缺一会被拒）
 
-1. **仓库**：GitHub 上有一个公开仓库（例如 `lisongjian/dsh-bot`），创建满 **1 天**，加 topic **`dsh-plugin`**，且项目仍在维护。
+1. **仓库**：GitHub 上有一个公开仓库（本仓库：`lisongjianustc/dsh-bot`），创建满 **1 天**，加 topic **`dsh-plugin`**，且项目仍在维护。
 2. **npm 包**：`package.json` 必须声明 **`dsh.bundle`**（只有 `dsh.client` 会被拒，这是最常见的拒绝原因），并有根 `cordis.patch.yml`。本包已满足。
 
 ## 1. 发布 npm 包
@@ -27,13 +27,13 @@ node scripts/build-client.mjs   # lib/client.js 必须是最新构建
 
 在 `awesome-dsh-plugin/awesome-dsh-plugin` 仓库新增一个文件：
 
-`data/plugins/lisongjian__dsh-bot.yml`
+`data/plugins/lisongjianustc__dsh-bot.yml`
 
 内容模板（按 contributing.md 的字段；`description.en` 必填）：
 
 ```yaml
 name: dsh-bot
-repo: lisongjian/dsh-bot
+repo: lisongjianustc/dsh-bot
 npm: "@lisongjianustc/dsh-bot"
 description:
   en: "MiniMax-Bot-style always-on agent team for DSH: named Bots backed by real DSH sessions, private and group chats, shared memory, scheduled tasks and usage."
