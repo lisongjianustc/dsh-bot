@@ -1,0 +1,21 @@
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Build the browser half
+        run: node scripts/build-client.mjs
+      - name: Host tests
+        run: node --test test/*.test.js
+      - name: Client smoke checks
+        run: node scripts/smoke-client.mjs
+      - name: Live smoke helper (informational)
+        run: node scripts/verify-live.mjs http://127.0.0.1:1 || true
