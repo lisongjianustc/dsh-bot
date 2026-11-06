@@ -1809,6 +1809,62 @@ var CSS = `
   overflow-wrap: anywhere;
 }
 
+/* ------------------------------------------------- group directories */
+
+.db-dir-field { display: flex; flex-direction: column; gap: 8px; min-inline-size: 0; }
+.db-dir-list { display: flex; flex-direction: column; gap: 6px; }
+.db-dir-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-inline-size: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 9px;
+  background: var(--dsw-alias-bg-layer-1);
+}
+.db-dir-icon { flex: none; display: inline-flex; color: var(--dsw-alias-label-secondary); }
+.db-dir-main { flex: 1; min-inline-size: 0; display: flex; flex-direction: column; gap: 1px; }
+.db-dir-title {
+  font-size: 12px;
+  color: var(--dsw-alias-label-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.db-dir-path {
+  font-size: 10.5px;
+  color: var(--dsw-alias-label-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.db-dir-add { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.db-dir-add .db-select { flex: 1; min-inline-size: 160px; }
+.db-dir-empty {
+  padding: 8px 10px;
+  border: 1px dashed var(--dsw-alias-border-l1);
+  border-radius: 9px;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 11.5px;
+}
+.db-dir-reset {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 7px 9px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--dsw-alias-brand-primary) 5%, transparent);
+}
+.db-card-dir {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-block-start: 2px;
+  color: var(--dsw-alias-label-secondary);
+}
+
 .db-tag.is-error {
   background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 13%, transparent);
   color: var(--dsw-alias-state-error-primary);

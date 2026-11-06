@@ -91,6 +91,27 @@ function sessionOpener(ctx) {
   }
 }
 
+/**
+ * The shell's absolute-path folder picker, or a silent no-op.
+ *
+ * `uiWorkspace.pickDirectory()` may be missing on older shells and may resolve
+ * with `undefined` when the user cancels; both are non-events for the form.
+ */
+function directoryPicker(ctx) {
+  return function () {
+    var workspace = optionalService(ctx, 'uiWorkspace')
+    if (workspace === null || workspace === undefined) return Promise.resolve(undefined)
+    if (typeof workspace.pickDirectory !== 'function') return Promise.resolve(undefined)
+    try {
+      var picked = workspace.pickDirectory()
+      if (picked === undefined || picked === null) return Promise.resolve(undefined)
+      return Promise.resolve(picked)
+    } catch (error) {
+      return Promise.resolve(undefined)
+    }
+  }
+}
+
 /** The panel switcher used by the settings page to jump to the workspace. */
 function panelOpener(ctx) {
   return function () {
@@ -146,6 +167,7 @@ function apply(ctx) {
 
   var slots = ctx.slots
   var opener = sessionOpener(ctx)
+  var pickDirectory = directoryPicker(ctx)
   var showPanel = panelOpener(ctx)
 
   // Sidebar row: the shell projects the label thunk on every locale change, so
@@ -179,7 +201,7 @@ function apply(ctx) {
             key: PANEL_ID,
             locale: NS,
             inject: function () {
-              return { store: store, openSession: opener }
+              return { store: store, openSession: opener, pickDirectory: pickDirectory }
             },
           },
           page.BotWorkspacePage,

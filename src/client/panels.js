@@ -14,6 +14,7 @@ var React = require('react')
 var ui = require('./ui.js')
 var transport = require('./transport.js')
 var avatarLib = require('./avatar.js')
+var directories = require('./directories.js')
 
 var h = ui.h
 var useStoreVersion = ui.useStoreVersion
@@ -172,7 +173,7 @@ function SettingsDrawer(props) {
   var body = null
   if (tab === 'general') body = h(GeneralTab, { t: t, store: store })
   else if (tab === 'bots') body = h(BotsTab, { t: t, store: store })
-  else if (tab === 'groups') body = h(GroupsTab, { t: t, store: store })
+  else if (tab === 'groups') body = h(GroupsTab, { t: t, store: store, pickDirectory: props.pickDirectory })
   else if (tab === 'tasks') body = h(TasksTab, { t: t, store: store })
   else if (tab === 'memory') body = h(MemoryTab, { t: t, store: store })
   else if (tab === 'schedules') body = h(SchedulesTab, { t: t, store: store })
@@ -518,6 +519,21 @@ function BotForm(props) {
     inheritLabel += ' (' + String(defaults.provider) + '/' + String(defaults.model) + ')'
   }
 
+  function addWorkspaceChoice(workspaceId) {
+    var list = store.workspaces()
+    for (var i = 0; i < list.length; i += 1) {
+      if (String(list[i].id) !== String(workspaceId)) continue
+      setDirectoryList(directories.addWorkspace(directoryList, list[i]).entries)
+      return
+    }
+  }
+
+  function addPickedDirectory() {
+    directories.pickDirectoryEntries(directoryList, props.pickDirectory).then(function (result) {
+      if (result.added === true) setDirectoryList(result.entries)
+    })
+  }
+
   function submit() {
     if (name.trim() === '') {
       setError(t('bots.form.nameRequired'))
@@ -544,9 +560,16 @@ function BotForm(props) {
     setError('')
     var action = isNew ? store.createBot(payload) : store.updateBot(bot.id, payload)
     action.then(
-      function () {
+      function (result) {
         setSaving(false)
-        store.flash(t('general.saved'), 'success')
+        var saved = isNew
+          ? store.groups().filter(function (item) { return item.name === name.trim() }).pop()
+          : store.groupById(group.id)
+        var savedDirs = saved === undefined ? [] : directories.normalize(saved.workspaces)
+        var unsupported = directoryList.length > 0 && savedDirs.length !== directoryList.length
+        var sessionsReset = result !== null && typeof result === 'object' && result.sessionsReset === true
+        if (unsupported) store.flash(t('groups.dirsUnsupported'), 'error')
+        else store.flash(sessionsReset ? t('groups.sessionsReset') : t('general.saved'), 'success')
         props.onClose()
       },
       function (failure) {
@@ -778,9 +801,11 @@ function GroupsTab(props) {
 
   if (editing !== null) {
     return h(GroupForm, {
+      key: editing === 'new' ? 'new' : String(editing.id),
       t: t,
       store: store,
       group: editing === 'new' ? undefined : editing,
+      pickDirectory: props.pickDirectory,
       onClose: function () {
         setEditing(null)
       },
@@ -859,6 +884,9 @@ function GroupsTab(props) {
                   ' · ',
                   group.replyMode === 'admin' ? t('groups.form.replyMode.admin') : t('groups.form.replyMode.all'),
                 ),
+                directories.summaryText(directories.normalize(group.workspaces), t) === ''
+                  ? null
+                  : h('div', { className: 'db-card-sub db-card-dir' }, directories.summaryText(directories.normalize(group.workspaces), t)),
               ),
               h(
                 'div',
@@ -970,6 +998,19 @@ function GroupForm(props) {
   var pairNotice = React.useState(isNew ? '' : String(group.notice === undefined ? '' : group.notice))
   var notice = pairNotice[0]
   var setNotice = pairNotice[1]
+  var initialDirectories = isNew ? [] : directories.normalize(group.workspaces)
+  var pairDirectories = React.useState(initialDirectories)
+  var directoryList = pairDirectories[0]
+  var setDirectoryList = pairDirectories[1]
+  var pairReset = React.useState(true)
+  var resetSessions = pairReset[0]
+  var setResetSessions = pairReset[1]
+  var directoriesChanged = !directories.sameEntries(initialDirectories, directoryList)
+  var availableWorkspaces = []
+  var allWorkspaces = store.workspaces()
+  for (var wi = 0; wi < allWorkspaces.length; wi += 1) {
+    if (directories.addWorkspace(directoryList, allWorkspaces[wi]).added === true) availableWorkspaces.push(allWorkspaces[wi])
+  }
   var pairSaving = React.useState(false)
   var saving = pairSaving[0]
   var setSaving = pairSaving[1]
@@ -990,6 +1031,21 @@ function GroupForm(props) {
     }
   }
 
+  function addWorkspaceChoice(workspaceId) {
+    var list = store.workspaces()
+    for (var i = 0; i < list.length; i += 1) {
+      if (String(list[i].id) !== String(workspaceId)) continue
+      setDirectoryList(directories.addWorkspace(directoryList, list[i]).entries)
+      return
+    }
+  }
+
+  function addPickedDirectory() {
+    directories.pickDirectoryEntries(directoryList, props.pickDirectory).then(function (result) {
+      if (result.added === true) setDirectoryList(result.entries)
+    })
+  }
+
   function submit() {
     if (name.trim() === '') {
       setError(t('bots.form.nameRequired'))
@@ -1003,23 +1059,36 @@ function GroupForm(props) {
     if (members.indexOf(adminId) < 0) members.push(adminId)
     var hops = parseInt(maxHops, 10)
     if (!isFinite(hops)) hops = 0
-    var payload = {
-      name: name.trim(),
-      adminId: adminId,
-      memberIds: members,
-      notice: notice,
-      replyMode: replyMode,
-      maxHops: Math.max(0, Math.min(20, hops)),
-      handover: handover,
-      useNote: useNote,
-    }
+    var payload = directories.applyToPayload(
+      {
+        name: name.trim(),
+        adminId: adminId,
+        memberIds: members,
+        notice: notice,
+        replyMode: replyMode,
+        maxHops: Math.max(0, Math.min(20, hops)),
+        handover: handover,
+        useNote: useNote,
+      },
+      directoryList,
+    )
+    var resetOption = directories.resetFlag(initialDirectories, directoryList, resetSessions)
     setSaving(true)
     setError('')
-    var action = isNew ? store.createGroup(payload) : store.updateGroup(group.id, payload)
+    var action = isNew
+      ? store.createGroup(payload, { resetSessions: resetOption })
+      : store.updateGroup(group.id, payload, { resetSessions: resetOption })
     action.then(
-      function () {
+      function (result) {
         setSaving(false)
-        store.flash(t('general.saved'), 'success')
+        var saved = isNew
+          ? store.groups().filter(function (item) { return item.name === name.trim() }).pop()
+          : store.groupById(group.id)
+        var savedDirs = saved === undefined ? [] : directories.normalize(saved.workspaces)
+        var unsupported = directoryList.length > 0 && savedDirs.length !== directoryList.length
+        var sessionsReset = result !== null && typeof result === 'object' && result.sessionsReset === true
+        if (unsupported) store.flash(t('groups.dirsUnsupported'), 'error')
+        else store.flash(sessionsReset ? t('groups.sessionsReset') : t('general.saved'), 'success')
         props.onClose()
       },
       function (failure) {
@@ -1139,6 +1208,95 @@ function GroupForm(props) {
         rows: 3,
         maxLength: limits.noticeMax,
       }),
+    }),
+    h(ui.Field, {
+      label: t('groups.form.directories'),
+      hint: t('groups.form.directoriesHint'),
+      children: h(
+        'div',
+        { className: 'db-dir-field' },
+        directoryList.length === 0
+          ? h('div', { className: 'db-dir-empty' }, t('groups.form.noDirs'))
+          : h(
+              'div',
+              { className: 'db-dir-list' },
+              directoryList.map(function (entry, index) {
+                return h(
+                  'div',
+                  { key: (entry.id === undefined ? 'p:' : 'i:') + String(entry.id === undefined ? entry.path : entry.id) + ':' + String(index), className: 'db-dir-item' },
+                  h('span', { className: 'db-dir-icon' }, h(Icon, { name: 'folder', size: 14 })),
+                  h(
+                    'span',
+                    { className: 'db-dir-main' },
+                    h('span', { className: 'db-dir-title', title: entry.title }, entry.title),
+                    entry.path === undefined ? null : h('span', { className: 'db-dir-path', title: entry.path }, entry.path),
+                  ),
+                  index === 0
+                    ? h(ui.Tag, { tone: 'brand' }, t('groups.form.primaryDir'))
+                    : h(ui.Button, {
+                        size: 'sm',
+                        variant: 'ghost',
+                        onClick: function () {
+                          setDirectoryList(directories.promote(directoryList, index))
+                        },
+                      }, t('groups.form.promoteDir')),
+                  h(ui.IconButton, {
+                    icon: 'x',
+                    size: 12,
+                    label: t('groups.form.removeDir'),
+                    title: t('groups.form.removeDir'),
+                    onClick: function () {
+                      setDirectoryList(directories.removeAt(directoryList, index))
+                    },
+                  }),
+                )
+              }),
+            ),
+        h(
+          'div',
+          { className: 'db-dir-add' },
+          availableWorkspaces.length === 0
+            ? h('span', { className: 'db-hint' }, t('groups.form.noWorkspaces'))
+            : h(
+                ui.Select,
+                {
+                  value: '',
+                  onChange: function (value) {
+                    if (value !== '') addWorkspaceChoice(value)
+                  },
+                },
+                h('option', { value: '' }, t('groups.form.addWorkspace')),
+                availableWorkspaces.map(function (workspace) {
+                  return h(
+                    'option',
+                    { key: workspace.id, value: String(workspace.id) },
+                    String(workspace.title === undefined ? workspace.id : workspace.title) +
+                      (workspace.path === undefined ? '' : ' · ' + workspace.path),
+                  )
+                }),
+              ),
+          h(ui.Button, { size: 'sm', icon: 'folder', onClick: addPickedDirectory }, t('groups.form.addFolder')),
+        ),
+        directoriesChanged
+          ? h(
+              'div',
+              { className: 'db-dir-reset' },
+              h(
+                'label',
+                { className: 'db-check' },
+                h('input', {
+                  type: 'checkbox',
+                  checked: resetSessions,
+                  onChange: function (event) {
+                    setResetSessions(event.target.checked)
+                  },
+                }),
+                h('span', null, t('groups.form.resetSessions')),
+              ),
+              h('p', { className: 'db-hint' }, t('groups.form.resetSessionsHint')),
+            )
+          : null,
+      ),
     }),
     h(
       'div',
@@ -2041,6 +2199,7 @@ module.exports = {
   GeneralTab: GeneralTab,
   BotsTab: BotsTab,
   GroupsTab: GroupsTab,
+  GroupForm: GroupForm,
   MemoryTab: MemoryTab,
   SchedulesTab: SchedulesTab,
   UsageTab: UsageTab,

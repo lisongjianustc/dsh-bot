@@ -151,6 +151,17 @@
   3. 补 zh/en 文案 `error.panelCrashed` / `action.retry`。
 - **验收**：真实 GUI 点「群组 → 编辑」正常渲染编辑表单（群名/管理员/成员复选/回复模式/保存/删除）；点保存成功（API state 确认 admin/replyMode/maxHops 未变）；控制台无错误；build 386,358 bytes + smoke 全过。截图：`docs/screenshots/settings-group-edit.png`。
 
+### 1.16 v0.3.4：群组多工作区/项目目录
+
+- **群组数据**：`workspaces: {id?,title,path?}[]`（≤8，第一个=主目录）；支持 DSH workspace id / 唯一标题 / 绝对路径（`~` 展开、存在且为目录、realpath 规范化、title=basename；路径属于已注册 workspace 时回带 id），按 id/path 去重。
+- **会话落点**：群聊有新会话时，主目录有 id → `sessionController.create({workspaceId})`，只有 path → `create({cwd})`；群无目录回退 Bot 自己 workspace pin → 默认 dsh-bot workspace。
+- **提示词**：群上下文新增「项目目录」段（zh/en，第一个标主目录，说明绝对路径读写受权限约束）。
+- **重建会话**：`resetSessions:true` 清除该群 chat 的成员会话映射（旧 DSH 会话仅解绑），下一条消息在新目录建会话；update 返回 `sessionsReset`。
+- **工具**：`bot_create_group` / `bot_update_group` 支持 `workspaces:string[]` 与 `reset_sessions`。
+- **客户端**：群组表单新增「项目目录 / 工作区」：chips（📁 标题+路径、主目录标记、删除、设为主目录）、已有工作区下拉、「添加文件夹…」（`uiWorkspace.pickDirectory`）、目录变化显示「重建群成员的群会话」复选框；群卡片摘要显示 `📁 主目录 · N 个目录`。
+- **真实验收**：API 创建群（workspace id + 文件夹路径）→ state 正确；改主目录 + `resetSessions` → 返回 true、会话映射清空，下一条群消息在新目录建会话（`session-74d4af5c…`，目录 `--Users-lisongjian-Project-DeepSeekHarness--`）；GUI 编辑表单正常显示目录 chip/主目录/添加控件/保存按钮。截图 `docs/screenshots/group-directories.png`。
+- **数字**：Host 164/164、Client smoke 196、真实 Host 冒烟 7/7。
+
 ## 3. 安装与验收步骤
 
 ### 3.1 全新安装

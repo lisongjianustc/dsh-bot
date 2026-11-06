@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -58,7 +58,7 @@ function make(t) {
     dispose()
     await store.close()
   })
-  return { captured, calls, services, ctx, helperCalls }
+  return { captured, calls, services, ctx, helperCalls, dir }
 }
 
 test('tools: the registered names match the prompt announcement exactly', async (t) => {
@@ -245,6 +245,38 @@ test('tools: group tools enforce the permission matrix and resolve names', async
   const deleted = await deleteGroup.execute({ group: 'Renamed' }, { agent: { id: 'session-alice' } })
   assert.equal(deleted.ok, true)
   assert.equal(services.groups.get('Renamed'), undefined)
+})
+
+test('tools: group tools pass project directories and the reset flag through', async (t) => {
+  const { captured, services, dir } = make(t)
+  const alice = await services.bots.create({ name: 'Alice' })
+  const bob = await services.bots.create({ name: 'Bob' })
+  const aliceChat = services.chats.findDm(alice.id)
+  await services.chats.setSession(aliceChat.id, alice.id, { sessionId: 'session-alice' })
+  for (const name of ['projA', 'projB']) mkdirSync(join(dir, name), { recursive: true })
+  const createGroup = captured.find(entry => entry.definition.name === 'bot_create_group').definition
+  const updateGroup = captured.find(entry => entry.definition.name === 'bot_update_group').definition
+  const created = await createGroup.execute({
+    name: 'Project',
+    members: ['Bob'],
+    workspaces: [join(dir, 'projA')],
+  }, { agent: { id: 'session-alice' } })
+  assert.equal(created.ok, true)
+  assert.equal(created.group.workspaces.length, 1)
+  assert.equal(created.group.workspaces[0].title, 'projA')
+  assert.match(created.group.workspaces[0].path, /projA$/)
+  const groupChat = services.chats.findGroupChat(created.group.id)
+  await services.chats.setSession(groupChat.id, alice.id, { sessionId: 'session-group' })
+  const updated = await updateGroup.execute({
+    group: 'Project',
+    workspaces: [join(dir, 'projB')],
+    reset_sessions: true,
+  }, { agent: { id: 'session-alice' } })
+  assert.equal(updated.ok, true)
+  assert.equal(updated.group.workspaces[0].title, 'projB')
+  assert.equal(updated.sessionsReset, true)
+  assert.equal(services.chats.sessionOf(groupChat.id, alice.id), undefined)
+  void bob
 })
 
 test('tools: helper tools report a receipt and enforce ownership', async (t) => {

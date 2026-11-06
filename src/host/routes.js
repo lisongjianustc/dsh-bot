@@ -199,7 +199,15 @@ export function registerRoutes({ ctx, store, services, runtime, hub, prompt, dis
     } else if (action === 'update') {
       const id = body.groupId ?? body.group?.id
       if (id === undefined) throw new BotError('invalid-request', 'an update needs groupId')
-      await services.groups.update(id, body.group ?? body)
+      // PROTOCOL puts resetSessions on the request body; the group patch keeps
+      // every other field. Accept the nested spelling too so both callers work.
+      const patch = { ...(body.group ?? body) }
+      if (body.resetSessions !== undefined && patch.resetSessions === undefined) {
+        patch.resetSessions = body.resetSessions
+      }
+      const result = await services.groups.update(id, patch)
+      await broadcastState()
+      return await stateReply({ sessionsReset: result.sessionsReset })
     } else if (action === 'delete') {
       const id = body.groupId ?? body.group?.id
       if (id === undefined) throw new BotError('invalid-request', 'a delete needs groupId')

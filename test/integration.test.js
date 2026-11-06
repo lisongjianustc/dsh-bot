@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Writable } from 'node:stream'
@@ -102,10 +102,12 @@ function makeHost(t) {
     attachSession: async () => {},
   }
   const createdWorkspaceIds = []
+  const createRequests = []
 
   const controller = {
     async create(request) {
       created += 1
+      createRequests.push({ ...request })
       createdWorkspaceIds.push(request?.workspaceId)
       const sessionId = `session-${created}`
       live.set(sessionId, { id: sessionId, header: {} })
@@ -329,7 +331,7 @@ function makeHost(t) {
     return { status: res.status, body: parsed, raw: res.body, res }
   }
 
-  return { ctx, dir, routes, route, call, prompts, cancels, tools, sections, live, emit, setPromptMode, registrations, createdWorkspaceIds }
+  return { ctx, dir, routes, route, call, prompts, cancels, tools, sections, live, emit, setPromptMode, registrations, createdWorkspaceIds, createRequests }
 }
 
 async function waitFor(predicate, timeoutMs = 3000) {
@@ -572,6 +574,64 @@ test('api: a chat can be pinned through the route and the frame reaches SSE', as
   assert.equal(missing.status, 404)
   assert.equal(missing.body.code, 'chat-not-found')
   void finished
+})
+
+test('api: a group main directory decides where member sessions are created', async (t) => {
+  const host = makeHost(t)
+  const alice = (await host.call('POST', '/bot', { body: { action: 'create', bot: { name: 'Alice' } } })).body.state.bots[0]
+  const bob = (await host.call('POST', '/bot', { body: { action: 'create', bot: { name: 'Bob' } } })).body.state.bots[1]
+  // A registered workspace becomes the session's workspace.
+  const byId = await host.call('POST', '/group', {
+    body: { action: 'create', group: { name: 'ById', memberIds: [alice.id, bob.id], adminId: alice.id, workspaces: ['ws-user'] } },
+  })
+  assert.equal(byId.body.ok, true)
+  const byIdGroup = byId.body.state.groups.find(group => group.name === 'ById')
+  assert.deepEqual(byIdGroup.workspaces, [{ id: 'ws-user', title: 'User Project', path: host.dir }])
+  const byIdChat = byId.body.state.chats.find(chat => chat.groupId === byIdGroup.id)
+  await host.call('POST', '/chat', { body: { action: 'send', chatId: byIdChat.id, text: 'hello' } })
+  assert.ok(await waitFor(async () => {
+    const page = await host.call('GET', `/messages?chatId=${encodeURIComponent(byIdChat.id)}`)
+    return page.body.messages.some(message => message.role === 'bot' && message.status === 'done')
+  }))
+  assert.equal(host.createRequests[0].workspaceId, 'ws-user')
+  assert.equal(host.createRequests[0].cwd, undefined)
+
+  // A path-only directory (not registered as a workspace) becomes the session's cwd.
+  const projectDir = join(host.dir, 'project')
+  mkdirSync(projectDir, { recursive: true })
+  const byPath = await host.call('POST', '/group', {
+    body: { action: 'create', group: { name: 'ByPath', memberIds: [alice.id, bob.id], adminId: alice.id, workspaces: [projectDir] } },
+  })
+  assert.equal(byPath.body.ok, true)
+  const byPathGroup = byPath.body.state.groups.find(group => group.name === 'ByPath')
+  assert.equal(byPathGroup.workspaces.length, 1)
+  assert.equal(byPathGroup.workspaces[0].title, 'project')
+  assert.equal(byPathGroup.workspaces[0].id, undefined)
+  const byPathChat = byPath.body.state.chats.find(chat => chat.groupId === byPathGroup.id)
+  await host.call('POST', '/chat', { body: { action: 'send', chatId: byPathChat.id, text: 'hello' } })
+  assert.ok(await waitFor(async () => {
+    const page = await host.call('GET', `/messages?chatId=${encodeURIComponent(byPathChat.id)}`)
+    return page.body.messages.some(message => message.role === 'bot' && message.status === 'done')
+  }))
+  const pathRequest = host.createRequests.find(request => request.cwd !== undefined)
+  assert.ok(pathRequest, 'a path-only group created its session with cwd')
+  assert.equal(pathRequest.cwd, byPathGroup.workspaces[0].path)
+  assert.equal(pathRequest.workspaceId, undefined)
+
+  // A group without directories falls back to the shared bot workspace.
+  const plain = await host.call('POST', '/group', {
+    body: { action: 'create', group: { name: 'Plain', memberIds: [alice.id, bob.id], adminId: alice.id } },
+  })
+  const plainGroup = plain.body.state.groups.find(group => group.name === 'Plain')
+  assert.deepEqual(plainGroup.workspaces, [])
+  const plainChat = plain.body.state.chats.find(chat => chat.groupId === plainGroup.id)
+  await host.call('POST', '/chat', { body: { action: 'send', chatId: plainChat.id, text: 'hello' } })
+  assert.ok(await waitFor(async () => {
+    const page = await host.call('GET', `/messages?chatId=${encodeURIComponent(plainChat.id)}`)
+    return page.body.messages.some(message => message.role === 'bot' && message.status === 'done')
+  }))
+  const fallback = host.createRequests.at(-1)
+  assert.equal(fallback.workspaceId, 'ws-bot')
 })
 
 test('api: a bot carries autoApprove and the panel can switch it off', async (t) => {

@@ -8,7 +8,9 @@
  *
  * @module @lisongjianustc/dsh-bot/host/services
  */
-import { mkdirSync } from 'node:fs'
+import { mkdirSync, realpathSync, statSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { basename, isAbsolute, join } from 'node:path'
 import { createAttachments } from './attachments.js'
 import { avatarForBot, isAvatarId, matchAvatar, normalizeAvatar } from './avatars.js'
 import { BotError, describeError } from './errors.js'
@@ -35,6 +37,8 @@ export const ROLE_MAX = 60
 export const INSTRUCTIONS_MAX = 4000
 /** Longest group notice. */
 export const NOTICE_MAX = 500
+/** How many project directories one group may hold. */
+export const GROUP_WORKSPACES_MAX = 8
 /** How many days of usage the panel may ask for. */
 export const USAGE_DAYS_MAX = 365
 
@@ -125,8 +129,18 @@ function resolveBotRef(bots, ref) {
   return byName?.id
 }
 
-/** One group draft as the panel sends it (member/admin refs may be ids or names). */
-function groupDraft(input, bots) {
+/**
+ * Normalize one group draft.
+ *
+ * Member/admin references may be ids or names. Project directories arrive as
+ * ids, registered titles or absolute paths, and are resolved by the caller's
+ * own resolver (it needs the live workspace registry and the filesystem).
+ * @param {object} input - the draft.
+ * @param {object[]} bots - the Bot roster.
+ * @param {(ref: unknown) => object} resolveWorkspace - resolves one directory ref.
+ * @returns {object} the normalized fields (workspaces only when supplied).
+ */
+function groupDraft(input, bots, resolveWorkspace) {
   if (typeof input !== 'object' || input === null || Array.isArray(input)) {
     throw new BotError('invalid-request', 'a group draft must be an object')
   }
@@ -158,6 +172,24 @@ function groupDraft(input, bots) {
   const replyMode = input.replyMode === undefined ? 'admin' : String(input.replyMode)
   if (!REPLY_MODES.includes(replyMode)) throw new BotError('invalid-request', 'a group reply mode is admin or all')
   const maxHops = Math.max(0, Math.min(HOP_LIMIT_MAX, Math.floor(Number(input.maxHops) || 0)))
+  let workspaces
+  if (input.workspaces !== undefined) {
+    const refs = Array.isArray(input.workspaces) ? input.workspaces : null
+    if (refs === null) throw new BotError('invalid-request', 'group workspaces must be an array')
+    if (refs.length > GROUP_WORKSPACES_MAX) {
+      throw new BotError('invalid-request', `a group holds at most ${GROUP_WORKSPACES_MAX} project directories`)
+    }
+    const resolved = []
+    const seen = new Set()
+    for (const ref of refs) {
+      const workspace = resolveWorkspace(ref)
+      const key = workspace.id !== undefined ? `id:${workspace.id}` : `path:${workspace.path}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      resolved.push(workspace)
+    }
+    workspaces = resolved
+  }
   return {
     name,
     adminId,
@@ -167,6 +199,7 @@ function groupDraft(input, bots) {
     maxHops,
     handover: input.handover === true,
     useNote: input.useNote === true,
+    ...(workspaces === undefined ? {} : { workspaces }),
   }
 }
 
@@ -262,6 +295,72 @@ export function createServices({ ctx, config = {}, store }) {
       throw new BotError('workspace-unavailable', `no workspace has the id "${workspaceId}"`)
     }
     return found
+  }
+
+  /**
+   * Resolve one group project directory: a workspace id, a uniquely titled
+   * workspace, or an existing absolute directory path.
+   * @param {unknown} ref - the reference.
+   * @returns {{ id?: string, title: string, path?: string }} the stored directory.
+   */
+  const resolveGroupWorkspace = (ref) => {
+    const raw = typeof ref === 'object' && ref !== null
+      ? String(ref.id ?? ref.path ?? ref.title ?? '').trim()
+      : String(ref ?? '').trim()
+    if (raw === '') throw new BotError('workspace-unavailable', 'a project directory reference is blank')
+    const registry = typeof ctx?.get === 'function' ? ctx.get('workspaceRegistry') : undefined
+    const rows = workspaceList()
+    // 1) a registered workspace id
+    let found
+    if (registry !== undefined && registry !== null && typeof registry.get === 'function') {
+      try {
+        found = registry.get(raw)
+      } catch {
+        found = undefined
+      }
+    }
+    if (found === undefined || found === null) found = rows.find(row => row.id === raw)
+    if (found !== undefined && found !== null) {
+      const path = typeof found.path === 'string' && found.path !== '' ? found.path : undefined
+      return {
+        id: String(found.id),
+        title: typeof found.title === 'string' && found.title !== '' ? found.title : (path === undefined ? String(found.id) : basename(path)),
+        ...(path === undefined ? {} : { path }),
+      }
+    }
+    // 2) a uniquely titled registered workspace
+    const byTitle = rows.filter(row => row.title.toLowerCase() === raw.toLowerCase())
+    if (byTitle.length === 1) return { ...byTitle[0] }
+    if (byTitle.length > 1) throw new BotError('workspace-unavailable', `more than one workspace is titled "${raw}"; use its id or path`)
+    // 3) an absolute directory path (a leading ~ is expanded for convenience)
+    const expanded = raw.startsWith('~') ? join(homedir(), raw.slice(1).replace(/^[/\\]/, '')) : raw
+    if (!isAbsolute(expanded)) {
+      throw new BotError('workspace-unavailable', `"${raw}" is neither a workspace id/title nor an absolute directory path`)
+    }
+    let canonical
+    try {
+      const stat = statSync(expanded)
+      if (!stat.isDirectory()) throw new Error('not a directory')
+      canonical = realpathSync(expanded)
+    } catch {
+      throw new BotError('workspace-unavailable', `the directory "${raw}" does not exist or is not a directory`)
+    }
+    let owner
+    try {
+      owner = rows.find((row) => {
+        if (typeof row.path !== 'string' || row.path === '') return false
+        try {
+          return realpathSync(row.path) === canonical
+        } catch {
+          // A registered workspace whose directory vanished cannot own the path.
+          return false
+        }
+      })
+    } catch {
+      owner = undefined
+    }
+    if (owner !== undefined) return { ...owner }
+    return { title: basename(canonical), path: canonical }
   }
 
   // ------------------------------------------------------------------ bots
@@ -455,13 +554,14 @@ export function createServices({ ctx, config = {}, store }) {
       return group
     },
     async create(draft) {
-      const fields = groupDraft(draft, db.bots)
+      const fields = groupDraft(draft, db.bots, resolveGroupWorkspace)
       if (db.groups.some(group => group.name.toLowerCase() === fields.name.toLowerCase())) {
         throw new BotError('invalid-request', `a group named "${fields.name}" already exists`)
       }
       const group = {
         id: newId('grp'),
         ...fields,
+        workspaces: fields.workspaces ?? [],
         noteEntries: [],
         createdAt: now(),
         updatedAt: now(),
@@ -483,7 +583,8 @@ export function createServices({ ctx, config = {}, store }) {
         maxHops: source.maxHops ?? group.maxHops,
         handover: source.handover ?? group.handover,
         useNote: source.useNote ?? group.useNote,
-      }, db.bots)
+        workspaces: source.workspaces === undefined ? group.workspaces : source.workspaces,
+      }, db.bots, resolveGroupWorkspace)
       if (db.groups.some(other => other.id !== group.id && other.name.toLowerCase() === fields.name.toLowerCase())) {
         throw new BotError('invalid-request', `a group named "${fields.name}" already exists`)
       }
@@ -501,8 +602,19 @@ export function createServices({ ctx, config = {}, store }) {
             text: clip(entry.text, 400),
           }))
       }
+      // Optional rebind: drop the group chat's member-session map so the next
+      // message composes fresh sessions in the (possibly changed) directories.
+      // The old DSH sessions themselves are left untouched, only unbound.
+      let sessionsReset = false
+      if (source.resetSessions === true) {
+        const chat = chats.findGroupChat(group.id)
+        if (chat !== undefined && db.sessions[chat.id] !== undefined) {
+          delete db.sessions[chat.id]
+          sessionsReset = true
+        }
+      }
       await store.save()
-      return group
+      return { group, sessionsReset }
     },
     async remove(ref) {
       const group = groups.require(ref)
@@ -1273,6 +1385,7 @@ export function createServices({ ctx, config = {}, store }) {
       maxHops: group.maxHops ?? 0,
       handover: group.handover === true,
       useNote: group.useNote === true,
+      workspaces: (group.workspaces ?? []).map(workspace => ({ ...workspace })),
       noteEntries: noteEntries(group),
       createdAt: group.createdAt ?? 0,
       updatedAt: group.updatedAt ?? 0,

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -351,6 +351,83 @@ test('services: an old bot without an avatar still renders one', async (t) => {
   const view = await services.stateView()
   assert.equal(view.bots[0].avatar.id, 'engineer-wrench')
   void store
+})
+
+test('services: a group resolves its project directories by id, title or path', async (t) => {
+  const projectDir = mkdtempSync(join(tmpdir(), 'dsh-bot-proj-'))
+  const otherDir = mkdtempSync(join(tmpdir(), 'dsh-bot-proj2-'))
+  t.after(() => {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(otherDir, { recursive: true, force: true })
+  })
+  const workspaceA = { id: 'ws-a', title: 'Alpha', path: projectDir }
+  const workspaceB = { id: 'ws-b', title: 'Beta', path: otherDir }
+  const registry = {
+    list: () => [workspaceA, workspaceB],
+    get: (id) => [workspaceA, workspaceB].find(row => row.id === id),
+    async resolveByPath() { return workspaceA },
+    async create() { return workspaceA },
+  }
+  const { services, dir } = make(t, registry)
+  const alice = await services.bots.create({ name: 'Alice' })
+  const created = await services.groups.create({
+    name: 'Project',
+    memberIds: [alice.id],
+    workspaces: ['ws-a', 'Beta'],
+  })
+  assert.deepEqual(created.workspaces, [
+    { id: 'ws-a', title: 'Alpha', path: projectDir },
+    { id: 'ws-b', title: 'Beta', path: otherDir },
+  ])
+  assert.deepEqual((await services.stateView()).groups[0].workspaces, created.workspaces)
+
+  // A plain absolute path (unregistered) is canonicalized and titled by its basename.
+  mkdirSync(join(dir, 'proj'), { recursive: true })
+  const byPath = await services.groups.create({ name: 'ByPath', memberIds: [alice.id], workspaces: [join(dir, 'proj')] })
+  assert.equal(byPath.workspaces[0].title, 'proj')
+  assert.equal(byPath.workspaces[0].id, undefined)
+  assert.match(byPath.workspaces[0].path, /proj$/)
+
+  // Duplicates collapse, and an empty array clears the directories.
+  const deduped = await services.groups.create({ name: 'Dedup', memberIds: [alice.id], workspaces: ['ws-a', 'ws-a', 'Alpha'] })
+  assert.deepEqual(deduped.workspaces.map(row => row.id), ['ws-a'])
+  const cleared = await services.groups.update(deduped.id, { workspaces: [] })
+  assert.deepEqual(cleared.group.workspaces, [])
+  // Omitting the field keeps the current directories.
+  const kept = await services.groups.update(deduped.id, { notice: 'x' })
+  assert.deepEqual(kept.group.workspaces, [])
+
+  await assert.rejects(
+    () => services.groups.create({ name: 'Bad', memberIds: [alice.id], workspaces: ['/definitely/not/a/real/dir'] }),
+    (error) => error.code === 'workspace-unavailable',
+  )
+  await assert.rejects(
+    () => services.groups.create({ name: 'Bad', memberIds: [alice.id], workspaces: ['relative/dir'] }),
+    (error) => error.code === 'workspace-unavailable',
+  )
+  await assert.rejects(
+    () => services.groups.create({ name: 'Bad', memberIds: [alice.id], workspaces: ['ws-a', 'ws-b', 'ws-a', 'ws-b', 'ws-a', 'ws-b', 'ws-a', 'ws-b', 'ws-a'] }),
+    (error) => error.code === 'invalid-request',
+  )
+})
+
+test('services: resetSessions unbinds only that group chat', async (t) => {
+  const { services } = make(t)
+  const alice = await services.bots.create({ name: 'Alice' })
+  const bob = await services.bots.create({ name: 'Bob' })
+  const first = await services.groups.create({ name: 'First', memberIds: [alice.id, bob.id], adminId: alice.id })
+  const second = await services.groups.create({ name: 'Second', memberIds: [alice.id, bob.id], adminId: alice.id })
+  const firstChat = services.chats.findGroupChat(first.id)
+  const secondChat = services.chats.findGroupChat(second.id)
+  await services.chats.setSession(firstChat.id, alice.id, { sessionId: 'session-one' })
+  await services.chats.setSession(secondChat.id, alice.id, { sessionId: 'session-two' })
+  const reset = await services.groups.update(first.id, { resetSessions: true })
+  assert.equal(reset.sessionsReset, true)
+  assert.equal(services.chats.sessionOf(firstChat.id, alice.id), undefined)
+  // The other group keeps its bindings; the old DSH session is only unbound.
+  assert.equal(services.chats.sessionOf(secondChat.id, alice.id).sessionId, 'session-two')
+  const noReset = await services.groups.update(first.id, { notice: 'again' })
+  assert.equal(noReset.sessionsReset, false)
 })
 
 test('services: the main bot chat is pinned by default, the others are not', async (t) => {

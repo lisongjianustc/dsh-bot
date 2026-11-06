@@ -148,6 +148,20 @@ export function briefFor({ bot, bots, groups, group, settings, note }) {
     } else {
       lines.push(noteText)
     }
+    const projectDirectories = Array.isArray(group.workspaces) ? group.workspaces : []
+    if (projectDirectories.length > 0) {
+      lines.push('')
+      lines.push(zh ? '## 项目目录' : '## Project directories')
+      projectDirectories.forEach((directory, index) => {
+        const label = clean(directory.title ?? '', 60) || `#${index + 1}`
+        const target = directory.path ?? directory.id ?? ''
+        const main = index === 0 ? (zh ? '（主目录）' : ' (main)') : ''
+        lines.push(`- ${label}: ${target}${main}`)
+      })
+      lines.push(zh
+        ? '你可以在这些目录里用绝对路径读写（受你当前的权限约束）。第一个是主目录。'
+        : 'You may read and write inside these directories by absolute path (subject to your permission). The first one is the main directory.')
+    }
   } else {
     lines.push(zh
       ? '你在和用户私聊。'

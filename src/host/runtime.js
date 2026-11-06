@@ -368,9 +368,40 @@ export function createRuntime({ ctx, store, services, hub, config = {} }) {
 
   /** Create one fresh Bot session in the shared workspace. */
   const createSession = async (chat, bot) => {
-    // A Bot may pin one DSH workspace; otherwise every Bot shares the plugin's
-    // own workspace. The pin only decides where NEW sessions are created: an
-    // existing session keeps its recorded cwd.
+    // A group is usually created for one project, so its main directory decides
+    // where new member sessions are composed. A registered workspace becomes the
+    // session's workspace; a path-only directory becomes its cwd. Group
+    // directories outrank the Bot's own pin for group chats.
+    const group = chat?.kind === 'group' && typeof services.groups?.get === 'function'
+      ? services.groups.get(chat.groupId)
+      : undefined
+    const primaryDirectory = Array.isArray(group?.workspaces) ? group.workspaces[0] : undefined
+    if (primaryDirectory !== undefined) {
+      if (controller === undefined || typeof controller.create !== 'function') {
+        throw new BotError('session-create-failed', 'this deployment cannot create a bot session')
+      }
+      let created
+      try {
+        created = primaryDirectory.id !== undefined
+          ? await controller.create({ workspaceId: primaryDirectory.id })
+          : await controller.create({ cwd: primaryDirectory.path })
+      } catch (error) {
+        throw new BotError(
+          'workspace-unavailable',
+          `the group main directory "${primaryDirectory.title ?? primaryDirectory.path ?? primaryDirectory.id}" could not be used: ${describeError(error)}`,
+          { cause: error },
+        )
+      }
+      const sessionId = created?.sessionId
+      if (typeof sessionId !== 'string' || sessionId === '') {
+        throw new BotError('session-create-failed', 'the host returned no session id')
+      }
+      await pinSession(sessionId, bot, chat)
+      return sessionId
+    }
+    // Otherwise a Bot may pin one DSH workspace; every other Bot shares the
+    // plugin's own workspace. The pin only decides where NEW sessions are
+    // created: an existing session keeps its recorded cwd.
     const pinned = typeof services.resolveWorkspace === 'function' ? services.resolveWorkspace(bot) : undefined
     const workspace = pinned ?? await services.ensureWorkspace()
     // `sessionController.create` is the ONLY creation path that composes the

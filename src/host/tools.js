@@ -130,6 +130,7 @@ export function registerTools({ ctx, services, dispatcher, runtime }) {
     maxHops: group.maxHops ?? 0,
     handover: group.handover === true,
     useNote: group.useNote === true,
+    workspaces: (group.workspaces ?? []).map(workspace => ({ ...workspace })),
   })
 
   const tools = [
@@ -249,6 +250,12 @@ export function registerTools({ ctx, services, dispatcher, runtime }) {
         max_hops: { type: 'number', description: 'relay hop limit 0..20; 0 means no limit' },
         handover: BOOLEAN('hand the previous reply conclusion to the next speaker'),
         use_note: BOOLEAN('keep a short group note of what each round concluded'),
+        workspaces: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'project directories: workspace ids, registered workspace titles, or absolute paths; the first is the main directory',
+        },
+        reset_sessions: BOOLEAN('rebind the group chat sessions (next message composes fresh sessions in the current directories)'),
       }, ['name', 'members']),
       async execute(args, exec) {
         const caller = requireMain(callerOf(exec))
@@ -264,6 +271,8 @@ export function registerTools({ ctx, services, dispatcher, runtime }) {
           maxHops: args.max_hops,
           handover: args.handover,
           useNote: args.use_note,
+          workspaces: args.workspaces,
+          resetSessions: args.reset_sessions,
         })
         return { ok: true, group: groupView(group) }
       },
@@ -281,6 +290,12 @@ export function registerTools({ ctx, services, dispatcher, runtime }) {
         max_hops: { type: 'number', description: 'relay hop limit 0..20' },
         handover: BOOLEAN('hand the previous reply conclusion to the next speaker'),
         use_note: BOOLEAN('keep a short group note of what each round concluded'),
+        workspaces: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'replacement project directories (workspace ids, titles or absolute paths); omitted keeps them; [] clears them',
+        },
+        reset_sessions: BOOLEAN('rebind the group chat sessions; the next message composes fresh sessions in the new directories'),
       }, ['group']),
       async execute(args, exec) {
         const caller = callerOf(exec)
@@ -298,6 +313,8 @@ export function registerTools({ ctx, services, dispatcher, runtime }) {
         if (args.max_hops !== undefined) patch.maxHops = args.max_hops
         if (args.handover !== undefined) patch.handover = args.handover
         if (args.use_note !== undefined) patch.useNote = args.use_note
+        if (args.workspaces !== undefined) patch.workspaces = args.workspaces
+        if (args.reset_sessions !== undefined) patch.resetSessions = args.reset_sessions
         if (args.admin !== undefined) patch.adminId = args.admin
         if (args.members !== undefined) {
           const refs = Array.isArray(args.members) ? args.members.map(ref => String(ref)) : []
@@ -305,8 +322,8 @@ export function registerTools({ ctx, services, dispatcher, runtime }) {
           patch.memberIds = refs
         }
         if (Object.keys(patch).length === 0) throw new BotError('invalid-request', 'the update changes nothing')
-        const updated = await services.groups.update(group.id, patch)
-        return { ok: true, group: groupView(updated) }
+        const result = await services.groups.update(group.id, patch)
+        return { ok: true, group: groupView(result.group), sessionsReset: result.sessionsReset }
       },
     }),
     defineTool({

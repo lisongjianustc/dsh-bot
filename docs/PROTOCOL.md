@@ -24,7 +24,7 @@
 |---|---|---|---|
 | GET | `dsh-bot/api/state` | — | `{ ok, state }`（StateView，见 §3） |
 | POST | `dsh-bot/api/bot` | `{ action:'create'|'update'|'delete', bot? , botId? }` | `{ ok, state }` |
-| POST | `dsh-bot/api/group` | `{ action:'create'|'update'|'delete', group?, groupId? }`（update 支持 `noteEntries:[]` 清空群备注） | `{ ok, state }` |
+| POST | `dsh-bot/api/group` | `{ action:'create'|'update'|'delete', group?, groupId?, resetSessions?:boolean }`（update 支持 `noteEntries:[]` 清空群备注；`group.workspaces` 为 id/path 数组，第一个是主目录；`resetSessions:true` 解绑该群成员会话，下一条消息在新目录建新会话） | `{ ok, state, sessionsReset? }` |
 | POST | `dsh-bot/api/chat` | `{ action:'send'|'cancel'|'retry'|'read'|'clear'|'create', chatId?, botId?, groupId?, text?, clientMessageId?, attachments?: string[] }` | `{ ok, state, chat? }`（read 只回 `{ok,chat}`） |
 | GET | `dsh-bot/api/messages?chatId=&before=&limit=` | — | `{ ok, messages:Message[], hasMore:boolean }` |
 | GET | `dsh-bot/api/usage?days=7` | — | `{ ok, usage:UsageView }` |
@@ -86,6 +86,7 @@ Group = {
   id, name, adminId, memberIds:string[], notice, replyMode:'admin'|'all',
   maxHops:number, handover:boolean, useNote:boolean,
   noteEntries:{ at:number, speaker:string, text:string }[], createdAt, updatedAt,
+  workspaces: { id?:string, title:string, path?:string }[],
 }
 Chat = {
   id, kind:'dm'|'group', botId?:string, groupId?:string, title:string,
@@ -154,7 +155,7 @@ ID 规则：`bot_<12hex>`、`grp_<12hex>`、`chat_<12hex>`、`msg_<12hex>`、`no
 
 ## 7. 模型可见工具（M1 先注册最小集，M4 补齐）
 
-`bot_list_team`、`bot_create`、`bot_update`、`bot_delete`、`bot_create_group`、`bot_update_group`、`bot_delete_group`、`bot_message`、`bot_dispatch_tasks`、`bot_get_tasks`、`bot_cancel_tasks`、`bot_post_group`、`bot_remember`、`bot_recall`、`bot_forget`、`bot_create_schedule`、`bot_list_schedules`、`bot_delete_schedule`、`bot_start_helper`、`bot_list_helpers`、`bot_stop_helper`（21 个，与 MiniMax Bot 对齐）。全部用**裸 ToolDefinition** 注册（`{name,description,parameters:JSONSchema,output:{schema,render},execute}`，不 import `@deepseek-ai/dsh-tools`），`execute(args, exec)` 用 `exec.agent.id` 认 caller；仅对 Bot 会话可见：`ctx.tools.register(def, { when: ({agent}) => services.bots.botOfSession(agent?.id) !== undefined })`。
+`bot_list_team`、`bot_create`、`bot_update`、`bot_delete`、`bot_create_group`、`bot_update_group`（两者接受 `workspaces?:string[]` 与 `reset_sessions?`）、`bot_delete_group`、`bot_message`、`bot_dispatch_tasks`、`bot_get_tasks`、`bot_cancel_tasks`、`bot_post_group`、`bot_remember`、`bot_recall`、`bot_forget`、`bot_create_schedule`、`bot_list_schedules`、`bot_delete_schedule`、`bot_start_helper`、`bot_list_helpers`、`bot_stop_helper`（21 个，与 MiniMax Bot 对齐）。全部用**裸 ToolDefinition** 注册（`{name,description,parameters:JSONSchema,output:{schema,render},execute}`，不 import `@deepseek-ai/dsh-tools`），`execute(args, exec)` 用 `exec.agent.id` 认 caller；仅对 Bot 会话可见：`ctx.tools.register(def, { when: ({agent}) => services.bots.botOfSession(agent?.id) !== undefined })`。
 
 ## 8. M0 事实（platform probe 已确认 / 待补充）
 

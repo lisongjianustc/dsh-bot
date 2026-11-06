@@ -200,6 +200,116 @@ check(avatarLib.matchAvatar({ name: 'Chief', role: '团队总管' }).id === 'lea
 const fallbackAvatar = avatarLib.renderAvatar({ kind: 'library', id: 'custom', motif: 'mystery', color: '#123456', background: '#ffffff' }, 32)
 check(React.isValidElement(fallbackAvatar), 'an unknown motif still renders an SVG element')
 
+/* ------------------------------------------------------------ directories */
+
+// Group directory rules and the form are asserted against the sources directly:
+// the form is pure presentation over these helpers, so this covers the chips,
+// the "main directory" ordering, the picker append and the save payload.
+const clientSourceCache = new Map()
+function loadClientModule(name) {
+  if (clientSourceCache.has(name)) return clientSourceCache.get(name).exports
+  const source = readFileSync(join(root, 'src', 'client', name), 'utf8')
+  const module = { exports: {} }
+  clientSourceCache.set(name, module)
+  // eslint-disable-next-line no-new-func
+  new Function('module', 'exports', 'require', source)(module, module.exports, (request) => {
+    if (request === 'react') return React
+    if (request.startsWith('./')) return loadClientModule(request.slice(2))
+    throw new Error('client module requested an unseeded module: ' + request)
+  })
+  return module.exports
+}
+
+const dirs = loadClientModule('directories.js')
+const mixed = dirs.normalize([
+  '/Users/me/game',
+  { path: '/Users/me/game', title: 'duplicated path' },
+  { id: 'ws_wiki', title: 'wiki', path: '/Users/me/wiki' },
+  '',
+  null,
+])
+check(mixed.length === 2 && mixed[0].title === 'game' && mixed[1].id === 'ws_wiki', 'normalize dedupes by id or path and titles a bare path')
+const withWorkspace = dirs.addWorkspace(dirs.addWorkspace([], { id: 'ws_game', title: 'game', path: '/Users/me/game' }).entries, { id: 'ws_game', title: 'game' })
+check(withWorkspace.added === false && withWorkspace.entries.length === 1, 'adding an already listed workspace is a no-op')
+const picked = await dirs.pickDirectoryEntries([], () => Promise.resolve('/Users/me/new-project'))
+check(picked.added === true && picked.entries[0].title === 'new-project' && picked.entries[0].path === '/Users/me/new-project', 'pickDirectory result is appended as a path entry')
+const cancelled = await dirs.pickDirectoryEntries([], () => Promise.resolve(undefined))
+check(cancelled.added === false && cancelled.entries.length === 0, 'a cancelled picker adds nothing')
+check((await dirs.pickDirectoryEntries([], undefined)).added === false, 'a missing picker is silent')
+const twoDirs = [picked.entries[0], { id: 'ws_wiki', title: 'wiki', path: '/Users/me/wiki' }]
+check(dirs.promote(twoDirs, 1)[0].id === 'ws_wiki', 'promoting the second directory makes it the main one')
+check(dirs.removeAt(twoDirs, 0).length === 1 && dirs.payloadOf(twoDirs).join(',') === '/Users/me/new-project,ws_wiki', 'remove and payload keep the Host order (id or path)')
+const groupPayload = dirs.applyToPayload({ name: '游戏组' }, twoDirs)
+check(Array.isArray(groupPayload.workspaces) && groupPayload.workspaces.length === 2, 'the group payload carries the directory list')
+check(dirs.resetFlag([], twoDirs, true) === true, 'a changed list requests a session rebuild when the box is checked')
+check(dirs.resetFlag([], twoDirs, false) === false, 'an unchecked rebuild box is an explicit no-reset')
+check(dirs.resetFlag(twoDirs, twoDirs, true) === undefined, 'an unchanged list sends no reset flag')
+check(dirs.summaryText(twoDirs, (key, params) => key + '=' + params.count) === '📁 new-project · groups.dirCount=2', 'the card summary names the main directory and the count')
+
+const fakeBots = [
+  { id: 'bot_a', name: 'Chief', role: '总管', color: '#3b6df6', avatar: null },
+  { id: 'bot_b', name: '架构师', role: '架构', color: '#f08a24', avatar: null },
+]
+const fakeStore = {
+  data: { limits: { nameMax: 40, groupNoteMax: 4000, noticeMax: 500, maxHops: 6 } },
+  bots: () => fakeBots,
+  workspaces: () => [
+    { id: 'ws_game', title: 'game', path: '/Users/me/game' },
+    { id: 'ws_wiki', title: 'wiki', path: '/Users/me/wiki' },
+  ],
+  flash() {},
+  createGroup: () => Promise.resolve({}),
+  updateGroup: () => Promise.resolve({}),
+  deleteGroup: () => Promise.resolve({}),
+  clearGroupNote: () => Promise.resolve({ cleared: false }),
+}
+const panelsModule = loadClientModule('panels.js')
+const localeSource = loadClientModule('locales.js')
+function tFromBundle(key, params) {
+  let text = localeSource.zh[key]
+  if (typeof text !== 'string') return key
+  if (params !== undefined && params !== null) {
+    for (const name of Object.keys(params)) text = text.split('{' + name + '}').join(String(params[name]))
+  }
+  return text
+}
+const existingForm = renderToStaticMarkup(
+  React.createElement(panelsModule.GroupForm, {
+    t: tFromBundle,
+    store: fakeStore,
+    pickDirectory: () => Promise.resolve('/Users/me/picked'),
+    onClose() {},
+    group: {
+      id: 'grp_smoke',
+      name: '游戏开发组',
+      adminId: 'bot_a',
+      memberIds: ['bot_a', 'bot_b'],
+      notice: '',
+      replyMode: 'all',
+      maxHops: 3,
+      handover: true,
+      useNote: true,
+      noteEntries: [],
+      workspaces: [
+        { id: 'ws_game', title: 'game', path: '/Users/me/game' },
+        { title: 'game-dev', path: '/Users/me/game-dev' },
+      ],
+    },
+  }),
+)
+check(existingForm.includes('项目目录 / 工作区') && existingForm.includes('/Users/me/game-dev'), 'the group form lists the configured directories')
+check(existingForm.includes('主目录') && existingForm.includes('设为主目录'), 'the first directory is the main one and later ones can be promoted')
+check(existingForm.includes('移除目录') && existingForm.includes('添加文件夹…'), 'each directory can be removed and a folder can be added')
+const freshForm = renderToStaticMarkup(
+  React.createElement(panelsModule.GroupForm, {
+    t: tFromBundle,
+    store: fakeStore,
+    pickDirectory: () => Promise.resolve('/Users/me/picked'),
+    onClose() {},
+  }),
+)
+check(freshForm.includes('尚未选择目录') && freshForm.includes('添加工作区'), 'a new group starts with an empty directory list and the workspace picker')
+
 /* ------------------------------------------------------------- stub cordis */
 
 const dictionaries = {}
@@ -359,6 +469,12 @@ check(tasksHtml.includes('后台助手') || tasksHtml.includes('助手'), 'tasks
 check(tasksHtml.includes('取消'), 'tasks tab offers cancelling a chat-backed task')
 store.closeDrawer()
 
+store.openDrawer('groups')
+await sleep(80)
+const groupsCardHtml = render(mainReg.component, face)
+check(groupsCardHtml.includes('📁 产品项目') && groupsCardHtml.includes('2 个目录'), 'the group card summarises its directories')
+store.closeDrawer()
+
 // M2: group note view + clear, bot auto-approve tag, schedules/native status,
 // long-message collapse and unconfirmed tool rows are exercised below.
 store.openDrawer('groups')
@@ -449,6 +565,24 @@ check(store.bots().length === botsBefore, 'deleteBot removes it again')
 await store.createGroup({ name: '冒烟群', adminId: store.bots()[0].id, memberIds: [store.bots()[0].id, store.bots()[1].id], replyMode: 'all', maxHops: 3, handover: true, useNote: true })
 check(store.groups().length === 2, 'createGroup adds a group in demo mode')
 const smokeGroup = store.groups().find((group) => group.name === '冒烟群')
+const smokeGroupChat = store.chats().find((chat) => chat.kind === 'group' && chat.groupId === smokeGroup.id)
+smokeGroupChat.sessionId = 'sess_smoke_group'
+const groupSaveResult = await store.updateGroup(
+  smokeGroup.id,
+  {
+    name: '冒烟群',
+    adminId: store.bots()[0].id,
+    memberIds: [store.bots()[0].id, store.bots()[1].id],
+    replyMode: 'all',
+    maxHops: 3,
+    handover: true,
+    useNote: true,
+    workspaces: ['ws_demo_default'],
+  },
+  { resetSessions: true },
+)
+check(groupSaveResult.sessionsReset === true && smokeGroupChat.sessionId === '', 'a reset request rebuilds the group session and reports it')
+check(store.groupById(smokeGroup.id).workspaces.length === 1, 'the group keeps the saved workspace list')
 await store.deleteGroup(smokeGroup.id)
 check(store.groups().length === 1, 'deleteGroup removes it again')
 
@@ -920,6 +1054,19 @@ try {
 }
 check(pinError !== undefined && pinError.code === 'invalid-request', 'a refused pin surfaces its Host error')
 check(store.chatById('chat_222222222222').pinned === true, 'a refused pin rolls the optimistic flag back')
+
+await store.updateGroup('grp_live', {
+  name: '线上群',
+  replyMode: 'all',
+  maxHops: 3,
+  handover: true,
+  useNote: true,
+  workspaces: ['ws_game', '/Users/me/custom'],
+}, { resetSessions: true })
+const groupUpdateCall = fetchCalls.filter((call) => call.path.includes('/group') && call.body !== undefined && call.body.action === 'update').pop()
+check(groupUpdateCall !== undefined && Array.isArray(groupUpdateCall.body.group.workspaces) && groupUpdateCall.body.group.workspaces.length === 2, 'a group update sends the workspaces array')
+check(groupUpdateCall !== undefined && groupUpdateCall.body.resetSessions === true, 'resetSessions travels beside the group draft')
+check(groupUpdateCall !== undefined && groupUpdateCall.body.group.resetSessions === true, 'the group draft carries resetSessions too for hosts that read it there')
 
 const liveGroupResult = await store.clearGroupNote('grp_live')
 check(liveGroupResult.cleared === false, 'clearGroupNote reports when the Host ignores noteEntries')

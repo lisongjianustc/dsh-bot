@@ -165,6 +165,10 @@ function buildDemoState() {
     ],
     createdAt: now - 86400000 * 4,
     updatedAt: now - 3600000,
+    workspaces: [
+      { id: 'ws_demo_product', title: '产品项目', path: '~/Project/product' },
+      { title: 'game-dev', path: '~/Project/game-dev' },
+    ],
   }
   var conv = [
     {
@@ -1864,7 +1868,8 @@ function createStore() {
     })
   }
 
-  function createGroup(draft) {
+  function createGroup(draft, options) {
+    var resetSessions = options !== null && options !== undefined && options.resetSessions === true
     if (store.mode === 'mock') {
       if (store.data !== null) {
         var group = Object.assign(
@@ -1906,17 +1911,35 @@ function createStore() {
     })
   }
 
-  function updateGroup(groupId, draft) {
+  function updateGroup(groupId, draft, options) {
+    var resetSessions = options !== null && options !== undefined && options.resetSessions === true
     if (store.mode === 'mock') {
       var group = groupById(groupId)
       if (group === undefined) return Promise.reject(new Error('group-not-found'))
       Object.assign(group, draft, { updatedAt: Date.now() })
+      var sessionsReset = resetSessions === true
+      if (sessionsReset) {
+        var groupChats = chats()
+        for (var gc = 0; gc < groupChats.length; gc += 1) {
+          if (groupChats[gc] === null || groupChats[gc].kind !== 'group' || groupChats[gc].groupId !== groupId) continue
+          groupChats[gc].sessionId = ''
+          delete store.messages[groupChats[gc].id]
+        }
+      }
       notify()
-      return Promise.resolve()
+      return Promise.resolve({ sessionsReset: sessionsReset })
     }
-    return transport.post('group', { action: 'update', groupId: groupId, group: draft }).then(function (body) {
+    var updateBody = { action: 'update', groupId: groupId, group: draft }
+    if (options !== null && options !== undefined && typeof options.resetSessions === 'boolean') {
+      // PROTOCOL puts resetSessions beside `group`; older Host builds read it off
+      // the draft, so send both spellings (the extra field is ignored safely).
+      updateBody.resetSessions = options.resetSessions
+      updateBody.group = Object.assign({}, draft, { resetSessions: options.resetSessions })
+    }
+    return transport.post('group', updateBody).then(function (body) {
       if (body !== null && typeof body === 'object' && body.state !== undefined) applyState(body.state)
       notify()
+      return body === null || typeof body !== 'object' ? {} : body
     })
   }
 
