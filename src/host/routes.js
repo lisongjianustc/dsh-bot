@@ -17,6 +17,7 @@ import { fileURLToPath } from 'node:url'
 import { MAX_UPLOAD_BYTES } from './attachments.js'
 import { isAvatarId } from './avatars.js'
 import { BotError, describeError, isBotError, statusForCode } from './errors.js'
+import { createFsBrowser } from './fs-browser.js'
 import { clip } from './util.js'
 
 /** The root-absolute path prefix the Host registers. */
@@ -211,6 +212,21 @@ export function registerRoutes({ ctx, store, services, runtime, hub, prompt, dis
     else if (level === 'warn' || level === 'error') console.warn(`[dsh-bot] ${message}`, error ?? '')
   }
 
+  /** The per-chat read-only file browser (roots are resolved per request). */
+  const fsBrowser = createFsBrowser({ ctx, services, store })
+
+  /** Read one chatId query parameter. */
+  const chatIdOf = (url) => {
+    const chatId = url.searchParams.get('chatId')
+    if (chatId === null || chatId === '') throw new BotError('invalid-request', 'the request needs a chatId')
+    return chatId
+  }
+  /** Read one path query parameter (absent means the chat's primary root). */
+  const pathOf = (url) => {
+    const value = url.searchParams.get('path')
+    return value === null ? undefined : value
+  }
+
   /** Publish the full state after a structural change. */
   const broadcastState = async () => {
     try {
@@ -397,7 +413,13 @@ export function registerRoutes({ ctx, store, services, runtime, hub, prompt, dis
         botId: body.botId ?? body.targetBotId,
         targetBotId: body.targetBotId,
       })
-      return { ok: true, entries, budgets: services.memory.budgets() }
+      return {
+        ok: true,
+        entries,
+        candidates: services.memoryCandidates.list(),
+        budgets: services.memory.budgets(),
+        autoMemory: services.autoMemoryEnabled(),
+      }
     }
     if (action === 'remember') {
       const scope = body.scope === 'bot' ? 'bot' : body.scope === 'self' ? 'self' : 'team'
@@ -415,6 +437,46 @@ export function registerRoutes({ ctx, store, services, runtime, hub, prompt, dis
       hub?.publish?.({ type: 'memory' })
       await broadcastState()
       return { ok: true, entry: result.entry, entries: result.entries, budgets: services.memory.budgets() }
+    }
+    if (action === 'edit') {
+      const scope = body.scope === 'bot' ? 'bot' : body.scope === 'self' ? 'self' : 'team'
+      const entries = services.memory.list({ scope, botId: body.botId ?? body.targetBotId, targetBotId: body.targetBotId })
+      const entry = entries.find(candidate => candidate.id === body.id)
+      if (entry === undefined) throw new BotError('memory-not-found', `no memory entry matches "${String(body.id ?? '')}"`)
+      if (body.revision !== undefined && body.revision !== entry.revision) {
+        throw new BotError('memory-conflict', 'the memory entry changed since it was read')
+      }
+      const result = await services.memory.remember({
+        scope,
+        id: entry.id,
+        replaceId: entry.id,
+        text: typeof body.text === 'string' ? body.text : entry.text,
+        ...(body.key === undefined ? {} : { key: body.key }),
+        ...(body.pinned === undefined ? {} : { pinned: body.pinned === true }),
+        botId: body.botId,
+        targetBotId: body.targetBotId,
+        source: 'panel',
+        by: 'user',
+      })
+      hub?.publish?.({ type: 'memory' })
+      await broadcastState()
+      return { ok: true, entry: result.entry, entries: result.entries, candidates: services.memoryCandidates.list(), budgets: services.memory.budgets() }
+    }
+    if (action === 'accept') {
+      const result = await runtime.autoMemory.accept({
+        candidateId: requireString(body, 'candidateId'),
+        text: typeof body.text === 'string' ? body.text : undefined,
+        by: 'user',
+      })
+      hub?.publish?.({ type: 'memory' })
+      await broadcastState()
+      return { ok: true, entry: result.entry, entries: result.entries, candidates: result.candidates, budgets: services.memory.budgets() }
+    }
+    if (action === 'reject') {
+      const result = await runtime.autoMemory.reject({ candidateId: requireString(body, 'candidateId') })
+      hub?.publish?.({ type: 'memory' })
+      await broadcastState()
+      return { ok: true, candidates: result.candidates, budgets: services.memory.budgets() }
     }
     if (action === 'forget') {
       const scope = body.scope === 'bot' ? 'bot' : body.scope === 'self' ? 'self' : 'team'
@@ -606,6 +668,33 @@ export function registerRoutes({ ctx, store, services, runtime, hub, prompt, dis
           refuse(res, 404, 'invalid-request', `no route serves ${method} ${path}`)
           return
         }
+        if (path === '/fs/roots') {
+          writeJson(res, 200, { ok: true, roots: fsBrowser.rootsFor(chatIdOf(url)) })
+          return
+        }
+        if (path === '/fs/list') {
+          const listing = fsBrowser.list({ chatId: chatIdOf(url), path: pathOf(url) })
+          writeJson(res, 200, { ok: true, path: listing.path, entries: listing.entries })
+          return
+        }
+        if (path === '/fs/read') {
+          const file = fsBrowser.read({ chatId: chatIdOf(url), path: pathOf(url) })
+          writeJson(res, 200, { ok: true, ...file })
+          return
+        }
+        if (path === '/fs/raw') {
+          const file = fsBrowser.raw({ chatId: chatIdOf(url), path: pathOf(url) })
+          res.writeHead(200, {
+            'content-type': file.mime,
+            'content-length': String(file.size),
+            'cache-control': 'private, max-age=0, no-store',
+            'x-content-type-options': 'nosniff',
+            'content-disposition': `${file.image ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(file.path.split(/[\\/]/).pop() ?? 'file')}`,
+            'referrer-policy': 'no-referrer',
+          })
+          createReadStream(file.path).pipe(res)
+          return
+        }
         if (path === '/media') {
           const id = url.searchParams.get('id')
           if (id === null || id === '') throw new BotError('invalid-request', 'the media route needs an id')
@@ -667,6 +756,13 @@ export function registerRoutes({ ctx, store, services, runtime, hub, prompt, dis
         }
         if (path === '/memory') {
           writeJson(res, 200, await handleMemory(body))
+          return
+        }
+        if (path === '/memory/auto') {
+          if (typeof body.enabled !== 'boolean') throw new BotError('invalid-request', '"enabled" must be a boolean')
+          await services.setAutoMemory(body.enabled)
+          await broadcastState()
+          writeJson(res, 200, await stateReply())
           return
         }
         if (path === '/schedule') {

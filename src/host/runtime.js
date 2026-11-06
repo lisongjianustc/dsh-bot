@@ -23,6 +23,7 @@
  * @module @lisongjianustc/dsh-bot/host/runtime
  */
 import { registerApprovalAnswerers } from './approval.js'
+import { createAutoMemory } from './auto-memory.js'
 import { BotError, describeError } from './errors.js'
 import { createHelpers } from './helpers.js'
 import { PASS_RE } from './mention.js'
@@ -34,6 +35,66 @@ export const DELTA_FLUSH_MS = 120
 export const STREAM_PERSIST_MS = 2000
 /** Default bound on one turn before it is reported as timed out. */
 export const TURN_TIMEOUT_MS = 30 * 60 * 1000
+/** How many characters of one tool call's arguments a message part keeps. */
+export const TOOL_ARGS_MAX = 2000
+/** How many characters of one tool result a message part keeps. */
+export const TOOL_RESULT_MAX = 4000
+/** How long the human-readable tool summary may be. */
+export const TOOL_SUMMARY_MAX = 160
+
+/** Parse one tool-call arguments string, or undefined when it is not JSON. */
+function parseArguments(raw) {
+  if (typeof raw !== 'string' || raw.trim() === '') return undefined
+  try {
+    const value = JSON.parse(raw)
+    return typeof value === 'object' && value !== null ? value : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/** The first line of a command, with a leading `cd <dir> && ` marker removed. */
+function commandHead(command) {
+  const first = String(command ?? '').split(/\r?\n/)[0].trim()
+  const stripped = first.replace(/^cd\s+[^&;]+\s*&&\s*/i, '')
+  return stripped === '' ? first : stripped
+}
+
+/**
+ * One line a person can read for a tool call: the command, the path or the URL.
+ * @param {string} name - tool name.
+ * @param {unknown} args - the raw arguments string or an already-parsed object.
+ * @returns {string} the summary, or '' when the tool has no useful one.
+ */
+export function toolCallSummary(name, args) {
+  const parsed = typeof args === 'string' ? parseArguments(args) : (typeof args === 'object' && args !== null ? args : undefined)
+  const tool = String(name ?? '')
+  let summary = ''
+  if (tool === 'bash' || tool === 'bash_persistent' || tool === 'shell') {
+    summary = commandHead(parsed?.command ?? parsed?.cmd ?? '')
+  } else if (tool === 'read' || tool === 'write' || tool === 'edit' || tool === 'apply_patch' || tool === 'str_replace_editor') {
+    summary = String(parsed?.path ?? parsed?.file_path ?? parsed?.filePath ?? '').trim()
+  } else if (tool === 'web_fetch') {
+    summary = String(parsed?.url ?? parsed?.href ?? '').trim()
+  } else if (tool === 'web_search') {
+    summary = String(parsed?.query ?? parsed?.q ?? '').trim()
+  }
+  return clip(summary.replace(/\s+/g, ' ').trim(), TOOL_SUMMARY_MAX)
+}
+
+/**
+ * The text a tool result carries: every text block joined.
+ * @param {unknown} content - the tool message content blocks.
+ * @returns {string} the joined text.
+ */
+export function toolResultText(content) {
+  if (typeof content === 'string') return content
+  if (!Array.isArray(content)) return ''
+  return content
+    .filter(block => block && (block.type === 'text' || block.type === 'output_text') && typeof block.text === 'string')
+    .map(block => block.text)
+    .join('\n')
+}
 
 /** Extract the text blocks of an assistant message's content. */
 function textOfContent(content) {
@@ -95,21 +156,41 @@ export function createTurnAccumulator({ botId }) {
       }
       return text
     },
-    /** One `tool/call` starts a tool part. */
-    addToolCall(callId, name) {
-      const index = parts.push({ type: 'tool', name: String(name ?? 'tool'), status: 'running' }) - 1
+    /**
+     * One `tool/call` starts a tool part.
+     *
+     * The panel shows the Bot's tool rows, so the part keeps what a person wants
+     * to see: the raw arguments (bounded), a one-line summary, and later the
+     * result. These fields live only on the message part — no extra ledger row.
+     * @param {string} callId - the tool call identity.
+     * @param {string} name - the tool name.
+     * @param {string} [args] - the raw arguments string.
+     * @returns {number} the part index.
+     */
+    addToolCall(callId, name, args) {
+      const rawArgs = typeof args === 'string' ? args : ''
+      const summary = toolCallSummary(name, rawArgs)
+      const index = parts.push({
+        type: 'tool',
+        name: String(name ?? 'tool'),
+        status: 'running',
+        ...(summary === '' ? {} : { summary }),
+        ...(rawArgs === '' ? {} : { args: clip(rawArgs, TOOL_ARGS_MAX) }),
+      }) - 1
       toolParts.set(String(callId), index)
       return index
     },
-    /** One `tool/result` settles the matching tool part. */
-    finishTool(callId, { ok, error }) {
+    /** One `tool/result` settles the matching tool part, with its text. */
+    finishTool(callId, { ok, error, result }) {
       const index = toolParts.get(String(callId))
       if (index === undefined) return false
       const previous = parts[index]
+      const text = clip(String(result ?? ''), TOOL_RESULT_MAX)
       parts[index] = {
         ...previous,
         status: ok ? 'ok' : 'failed',
         ...(ok || error === undefined ? {} : { error: clip(String(error), 500) }),
+        ...(text === '' ? {} : { result: text }),
       }
       return true
     },
@@ -211,6 +292,8 @@ export function createRuntime({ ctx, store, services, hub, config = {} }) {
   let disposed = false
   /** The background-helper manager, attached after the runtime facade exists. */
   let helpersApi
+  /** The automatic memory engine, attached after the runtime facade exists. */
+  let autoMemoryApi
 
   const log = (level, message, error) => {
     const logger = ctx?.logger
@@ -635,6 +718,24 @@ export function createRuntime({ ctx, store, services, hub, config = {} }) {
       turnId: state.turnId,
       ...(mapped.error === undefined ? {} : { error: mapped.error }),
     })
+    // Automatic memory: the user's instruction-like sentences and the Bot's
+    // explicit conclusions. Pure heuristics; nothing is injected until the entry
+    // is accepted (a strong instruction is accepted automatically).
+    try {
+      const history = services.messages.list(state.chatId)
+      const index = history.findIndex(message => message.id === state.messageId)
+      const asked = index < 0 ? undefined : [...history.slice(0, index)].reverse().find(message => message.role === 'user')
+      const userText = typeof asked?.text === 'string' ? asked.text : ''
+      await autoMemoryApi?.consider?.({
+        chat: services.chats.get(state.chatId),
+        bot: services.bots.get(state.botId),
+        userText,
+        botText: snapshot.text,
+        messageId: state.messageId,
+      })
+    } catch (error) {
+      log('warn', 'the automatic memory pass failed', error)
+    }
     const usage = accumulator.usage
     try {
       await services.usage.record({
@@ -722,7 +823,7 @@ export function createRuntime({ ctx, store, services, hub, config = {} }) {
       if (event.type === 'tool/call') {
         const turn = Number(event.data?.turn)
         if (Number.isFinite(turn) && state.turns.size > 0 && !state.turns.has(turn)) return
-        state.accumulator.addToolCall(event.data?.callId, event.data?.name)
+        state.accumulator.addToolCall(event.data?.callId, event.data?.name, event.data?.arguments)
         const snapshot = state.accumulator.snapshot()
         try {
           const message = await services.messages.update(state.chatId, state.messageId, {
@@ -746,6 +847,7 @@ export function createRuntime({ ctx, store, services, hub, config = {} }) {
         state.accumulator.finishTool(callId, {
           ok: !failed,
           error: event.data?.error?.reason ?? event.data?.error?.code,
+          result: toolResultText(event.data?.message?.content),
         })
         const snapshot = state.accumulator.snapshot()
         try {
@@ -895,6 +997,11 @@ export function createRuntime({ ctx, store, services, hub, config = {} }) {
   const dispose = async () => {
     disposed = true
     try {
+      autoMemoryApi?.dispose?.()
+    } catch {
+      /* the fiber is going away */
+    }
+    try {
       await helpersApi?.dispose?.()
     } catch {
       /* the fiber is going away */
@@ -937,5 +1044,7 @@ export function createRuntime({ ctx, store, services, hub, config = {} }) {
 
   helpersApi = createHelpers({ ctx, services, runtime: runtimeApi })
   runtimeApi.helpers = helpersApi
+  autoMemoryApi = createAutoMemory({ ctx, services, store })
+  runtimeApi.autoMemory = autoMemoryApi
   return runtimeApi
 }

@@ -572,6 +572,32 @@ test('services: dispatched tasks and batches are projected into the state', asyn
   assert.equal(services.tasks.get('task_1').result, 'done!')
 })
 
+test('services: memory candidates and the auto-memory switch', async (t) => {
+  const { services } = make(t)
+  const alice = await services.bots.create({ name: 'Alice' })
+  assert.equal(services.autoMemoryEnabled(), true)
+  assert.equal((await services.stateView()).settings.autoMemory, true)
+  const candidate = await services.memoryCandidates.add({
+    id: 'cand_1', scope: 'team', text: '我偏好表格', reason: 'user-instruction',
+    source: { chatId: 'chat_1' }, confidence: 0.9, createdAt: 1,
+  })
+  assert.equal(services.memoryCandidates.list().length, 1)
+  assert.equal(services.memoryCandidates.get('cand_1').text, '我偏好表格')
+  const removed = await services.memoryCandidates.remove(candidate.id)
+  assert.equal(removed.id, 'cand_1')
+  assert.equal(services.memoryCandidates.list().length, 0)
+  assert.throws(() => services.memoryCandidates.require('cand_1'), (error) => error.code === 'invalid-request')
+  // The switch is persisted in settings and reflected in state.
+  await services.setAutoMemory(false)
+  assert.equal(services.autoMemoryEnabled(), false)
+  assert.equal((await services.stateView()).settings.autoMemory, false)
+  await services.setAutoMemory(true)
+  // An automatically captured entry keeps its auto flag.
+  const written = await services.memory.remember({ scope: 'team', text: '团队统一用中文', botId: alice.id, source: 'auto', auto: true })
+  assert.equal(written.entry.auto, true)
+  void alice
+})
+
 test('services: the notice language follows the ledger settings', async (t) => {
   const { services, store } = make(t)
   assert.equal(services.language(), 'zh')

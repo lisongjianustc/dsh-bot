@@ -1344,7 +1344,7 @@ function GroupForm(props) {
 
 /* ------------------------------------------------------------------ memory */
 
-/** Team-level and per-bot memory with add/delete. */
+/** Team-level and per-bot memory: auto switch, pending candidates, editing. */
 function MemoryTab(props) {
   var t = props.t
   var store = props.store
@@ -1356,8 +1356,28 @@ function MemoryTab(props) {
   var pairSaving = React.useState(false)
   var saving = pairSaving[0]
   var setSaving = pairSaving[1]
+  var pairEditing = React.useState(null)
+  var editingId = pairEditing[0]
+  var setEditingId = pairEditing[1]
+  var pairEditText = React.useState('')
+  var editText = pairEditText[0]
+  var setEditText = pairEditText[1]
+  var pairEditBusy = React.useState(false)
+  var editBusy = pairEditBusy[0]
+  var setEditBusy = pairEditBusy[1]
+  var pairCandidateEdit = React.useState(null)
+  var candidateEditId = pairCandidateEdit[0]
+  var setCandidateEditId = pairCandidateEdit[1]
+  var pairCandidateText = React.useState('')
+  var candidateText = pairCandidateText[0]
+  var setCandidateText = pairCandidateText[1]
+  var pairAutoBusy = React.useState(false)
+  var autoBusy = pairAutoBusy[0]
+  var setAutoBusy = pairAutoBusy[1]
   var bots = store.bots()
   var entryMax = store.data === null ? 6000 : store.data.limits.memoryEntryMax
+  var candidates = Array.isArray(memory.candidates) ? memory.candidates : []
+  var autoMemory = memory.autoMemory !== false
 
   React.useEffect(
     function () {
@@ -1382,6 +1402,153 @@ function MemoryTab(props) {
     )
   }
 
+  function toggleAuto() {
+    setAutoBusy(true)
+    store.setAutoMemory(!autoMemory).then(
+      function () {
+        setAutoBusy(false)
+      },
+      function (failure) {
+        setAutoBusy(false)
+        store.flash(transport.describeError(t, failure), 'error')
+      },
+    )
+  }
+
+  function startEdit(entry) {
+    setEditingId(entry.id)
+    setEditText(String(entry.text === undefined ? '' : entry.text))
+  }
+
+  function saveEdit(entry) {
+    var value = editText.trim()
+    if (value === '') return
+    setEditBusy(true)
+    store.memoryEdit(entry.scope, entry.id, value, entry.revision).then(
+      function () {
+        setEditBusy(false)
+        setEditingId(null)
+        store.flash(t('general.saved'), 'success')
+      },
+      function (failure) {
+        setEditBusy(false)
+        store.flash(transport.describeError(t, failure), 'error')
+      },
+    )
+  }
+
+  function togglePin(entry) {
+    store
+      .memoryEdit(entry.scope, entry.id, undefined, entry.revision, { pinned: entry.pinned !== true })
+      .catch(function (failure) {
+        store.flash(transport.describeError(t, failure), 'error')
+      })
+  }
+
+  function forgetEntry(entry) {
+    store.forget(entry.id).catch(function (failure) {
+      store.flash(transport.describeError(t, failure), 'error')
+    })
+  }
+
+  function startCandidateEdit(candidate) {
+    setCandidateEditId(candidate.id)
+    setCandidateText(String(candidate.text === undefined ? '' : candidate.text))
+  }
+
+  function acceptCandidate(candidate, editedText) {
+    store.memoryAccept(candidate.id, editedText).then(
+      function () {
+        setCandidateEditId(null)
+        setCandidateText('')
+        store.flash(t('memory.accepted'), 'success')
+      },
+      function (failure) {
+        store.flash(transport.describeError(t, failure), 'error')
+      },
+    )
+  }
+
+  function rejectCandidate(candidate) {
+    store.memoryReject(candidate.id).then(
+      function () {
+        if (candidateEditId === candidate.id) {
+          setCandidateEditId(null)
+          setCandidateText('')
+        }
+        store.flash(t('memory.ignored'), 'success')
+      },
+      function (failure) {
+        store.flash(transport.describeError(t, failure), 'error')
+      },
+    )
+  }
+
+  function sourceLabel(candidate) {
+    var source = candidate.source === undefined || candidate.source === null ? {} : candidate.source
+    var chatId = source.chatId
+    var chat = chatId === undefined ? undefined : store.chatById(chatId)
+    if (chat !== undefined && chat !== null) return t('memory.sourceChat', { name: store.chatTitle(chat) })
+    return chatId === undefined ? t('memory.sourceAuto') : String(chatId)
+  }
+
+  var candidateSection = [
+    h(
+      'div',
+      { key: 'cand-head', className: 'db-row' },
+      h('span', { className: 'db-section-title' }, t('memory.candidates')),
+      h(ui.Tag, { tone: candidates.length > 0 ? 'brand' : undefined }, t('memory.candidateCount', { count: String(candidates.length) })),
+    ),
+    candidates.length === 0
+      ? h('p', { key: 'cand-empty', className: 'db-hint' }, t('memory.candidatesEmpty'))
+      : candidates.map(function (candidate) {
+          var editing = candidateEditId === candidate.id
+          var confidence = typeof candidate.confidence === 'number' ? Math.round(Math.max(0, Math.min(1, candidate.confidence)) * 100) : undefined
+          return h(
+            'div',
+            { key: candidate.id, className: 'db-mem-item is-candidate' },
+            h(
+              'div',
+              { className: 'db-mem-text' },
+              editing
+                ? h(ui.TextArea, {
+                    value: candidateText,
+                    onChange: setCandidateText,
+                    rows: 2,
+                    maxLength: entryMax,
+                  })
+                : h('span', { className: 'db-mem-body' }, String(candidate.text === undefined ? '' : candidate.text)),
+              h(
+                'div',
+                { className: 'db-mem-meta' },
+                h(ui.Tag, null, candidate.scope === 'bot' ? t('memory.scope.bot') : t('memory.scope.team')),
+                typeof confidence === 'number' ? h('span', null, t('memory.confidence', { value: String(confidence) })) : null,
+                h('span', null, sourceLabel(candidate)),
+              ),
+              candidate.reason === undefined || candidate.reason === '' ? null : h('div', { className: 'db-mem-reason' }, t('memory.reason') + '：' + String(candidate.reason)),
+            ),
+            h(
+              'div',
+              { className: 'db-mem-actions' },
+              editing
+                ? h(
+                    'span',
+                    { className: 'db-row db-gap' },
+                    h(ui.Button, { size: 'sm', variant: 'primary', disabled: candidateText.trim() === '', onClick: function () { acceptCandidate(candidate, candidateText) } }, t('memory.acceptEdit')),
+                    h(ui.Button, { size: 'sm', variant: 'ghost', onClick: function () { setCandidateEditId(null); setCandidateText('') } }, t('action.cancel')),
+                  )
+                : h(
+                    'span',
+                    { className: 'db-row db-gap' },
+                    h(ui.Button, { size: 'sm', variant: 'primary', onClick: function () { acceptCandidate(candidate) } }, t('memory.accept')),
+                    h(ui.Button, { size: 'sm', variant: 'ghost', onClick: function () { startCandidateEdit(candidate) } }, t('memory.acceptEdit')),
+                    h(ui.Button, { size: 'sm', variant: 'ghost', onClick: function () { rejectCandidate(candidate) } }, t('memory.ignore')),
+                  ),
+            ),
+          )
+        }),
+  ]
+
   return h(
     'div',
     { className: 'db-stack' },
@@ -1391,6 +1558,18 @@ function MemoryTab(props) {
       h('h3', { className: 'db-title' }, t('memory.title')),
       h('p', { className: 'db-subtitle' }, t('memory.subtitle')),
     ),
+    h(
+      'div',
+      { className: 'db-mem-auto' },
+      h(ui.Toggle, {
+        checked: autoMemory,
+        disabled: autoBusy,
+        label: t('memory.auto'),
+        onChange: toggleAuto,
+      }),
+      h('p', { className: 'db-hint' }, t('memory.autoHint')),
+    ),
+    h('div', { className: 'db-mem-candidates' }, candidateSection),
     h(ui.Segmented, {
       label: t('memory.title'),
       value: memory.scope,
@@ -1449,36 +1628,65 @@ function MemoryTab(props) {
         ? h(ui.Empty, { glyph: 'memory', title: t('memory.empty'), body: t('memory.emptyHint') })
         : memory.entries.map(function (entry, index) {
             var entryId = entry.id === undefined ? entry.key : entry.id
+            var editing = editingId === entryId
+            var scopeLabel =
+              entry.scope === 'bot' ? t('memory.scope.bot') : entry.scope === 'self' ? t('memory.scope.self') : t('memory.scope.team')
+            var at = entry.addedAt === undefined ? entry.at : entry.addedAt
             return h(
               'div',
               { key: String(entryId === undefined ? index : entryId), className: 'db-mem-item' },
               h(
                 'div',
                 { className: 'db-mem-text' },
-                String(entry.text === undefined ? (entry.value === undefined ? '' : entry.value) : entry.text),
+                editing
+                  ? h(ui.TextArea, { value: editText, onChange: setEditText, rows: 3, maxLength: entryMax })
+                  : h('span', { className: 'db-mem-body' }, String(entry.text === undefined ? (entry.value === undefined ? '' : entry.value) : entry.text)),
                 h(
                   'div',
                   { className: 'db-mem-meta' },
-                  entry.pinned === true ? t('memory.pinned') + ' · ' : '',
-                  entry.addedAt === undefined && entry.at === undefined
-                    ? ''
-                    : ui.formatDate(entry.addedAt === undefined ? entry.at : entry.addedAt) + ' ' + ui.formatTime(entry.addedAt === undefined ? entry.at : entry.addedAt),
+                  h(ui.Tag, null, scopeLabel),
+                  entry.auto === true ? h(ui.Tag, { tone: 'brand' }, t('memory.autoBadge')) : null,
+                  entry.pinned === true ? h(ui.Tag, null, t('memory.pinned')) : null,
+                  at === undefined ? null : h('span', null, ui.formatDate(at) + ' ' + ui.formatTime(at)),
                 ),
               ),
               h(
                 'div',
                 { className: 'db-mem-actions' },
-                h(ui.ConfirmButton, {
-                  label: t('memory.delete'),
-                  confirmLabel: t('action.confirm'),
-                  title: t('memory.deleteConfirm'),
-                  disabled: entryId === undefined,
-                  onConfirm: function () {
-                    store.forget(entryId).catch(function (failure) {
-                      store.flash(transport.describeError(t, failure), 'error')
-                    })
-                  },
-                }),
+                editing
+                  ? h(
+                      'span',
+                      { className: 'db-row db-gap' },
+                      h(ui.Button, { size: 'sm', variant: 'primary', disabled: editBusy || editText.trim() === '', onClick: function () { saveEdit(entry) } }, editBusy ? t('memory.saving') : t('action.save')),
+                      h(ui.Button, { size: 'sm', variant: 'ghost', onClick: function () { setEditingId(null) } }, t('action.cancel')),
+                    )
+                  : h(
+                      'span',
+                      { className: 'db-row db-gap' },
+                      h(ui.IconButton, {
+                        icon: 'edit',
+                        size: 12,
+                        label: t('memory.edit'),
+                        title: t('memory.edit'),
+                        disabled: entryId === undefined,
+                        onClick: function () { startEdit(entry) },
+                      }),
+                      h(ui.IconButton, {
+                        icon: 'pin',
+                        size: 12,
+                        label: entry.pinned === true ? t('memory.unpin') : t('memory.pin'),
+                        title: entry.pinned === true ? t('memory.unpin') : t('memory.pin'),
+                        active: entry.pinned === true,
+                        onClick: function () { togglePin(entry) },
+                      }),
+                      h(ui.ConfirmButton, {
+                        label: t('memory.delete'),
+                        confirmLabel: t('action.confirm'),
+                        title: t('memory.deleteConfirm'),
+                        disabled: entryId === undefined,
+                        onConfirm: function () { forgetEntry(entry) },
+                      }),
+                    ),
               ),
             )
           }),

@@ -28,12 +28,17 @@
 | POST | `dsh-bot/api/chat` | `{ action:'send'|'cancel'|'retry'|'read'|'clear'|'create', chatId?, botId?, groupId?, text?, clientMessageId?, attachments?: string[] }` | `{ ok, state, chat? }`（read 只回 `{ok,chat}`） |
 | GET | `dsh-bot/api/messages?chatId=&before=&limit=` | — | `{ ok, messages:Message[], hasMore:boolean }` |
 | GET | `dsh-bot/api/usage?days=7` | — | `{ ok, usage:UsageView }` |
-| POST | `dsh-bot/api/memory` | `{ action:'list'|'remember'|'forget', scope, text?, key?, id?, pinned?, targetBotId? }` | `{ ok, entries? }` |
+| POST | `dsh-bot/api/memory` | `{ action:'list'|'remember'|'forget'|'edit'|'accept'|'reject', scope, text?, key?, id?, pinned?, targetBotId?, candidateId? }` | `{ ok, entries?, candidates?, budgets? }` |
+| POST | `dsh-bot/api/memory/auto` | `{ enabled:boolean }` | `{ ok, state }`（自动记忆总开关） |
 | POST | `dsh-bot/api/schedule` | `{ action:'create'|'update'|'list'|'delete'|'run', scheduleId?, botId?, title?, prompt?, timing? }` | `{ ok, state, schedules? }` |
 | GET | `dsh-bot/api/events?since=<seq>` | SSE | 见 §4 |
 | POST | `dsh-bot/api/upload?name=<name>` | 原始字节（`application/octet-stream` 或图片 mime），≤25 MiB | `{ ok, attachment:{id,name,size,mime,url} }` |
 | GET | `dsh-bot/api/media?id=<attachmentId>` | — | 文件流（图片 inline，其余 attachment） |
 | GET | `dsh-bot/api/avatar/<id>.svg[?variant=transparent]` | — | 头像 SVG（40 个预设之一；id 白名单、immutable cache、nosniff；未知 404） |
+| GET | `dsh-bot/api/fs/roots?chatId=` | — | 该会话允许浏览的根目录 `{ok, roots:[{title,path}]}`（群目录 / Bot 工作区 / 插件默认工作区） |
+| GET | `dsh-bot/api/fs/list?chatId=&path=` | — | 目录列表 `{ok, path, entries:[{name,path,type:'dir'|'file',size,mtime}]}`；相对路径按会话主目录解析；越界 403 |
+| GET | `dsh-bot/api/fs/read?chatId=&path=` | — | 文本文件内容 `{ok, path, mime, size, text}`（≤512KiB；二进制返回 `unsupported`） |
+| GET | `dsh-bot/api/fs/raw?chatId=&path=` | — | 原始文件流（图片/PDF 预览用；同样根目录白名单） |
 | POST | `dsh-bot/api/config` | `{ patch:{ userName?, language? } }` | `{ ok, state }` |
 
 会话错误码（`code`）：`invalid-request`、`bot-not-found`、`chat-not-found`、`group-not-found`、`session-busy`、`model-unavailable`、`ledger-unavailable`、`internal`。
@@ -71,7 +76,8 @@ ScheduleView = {
         | { kind:'once', minutes?:number } | { kind:'at', at?:string },
   enabled:boolean, nativeId?:string, createdAt:number,
 }
-MemoryEntry = { id, scope:'team'|'bot'|'self', text, key?, pinned:boolean, addedAt:number, revision:string, source?, by? }
+MemoryEntry = { id, scope:'team'|'bot'|'self', text, key?, pinned:boolean, addedAt:number, revision:string, source?, by?, auto?:boolean }
+MemoryCandidate = { id, scope:'team'|'bot', botId?, text, reason, source:{chatId,messageId?}, confidence:number, createdAt:number }
 
 Bot = {
   id, name, role, instructions, skin, color, avatar?, isMain:boolean,
@@ -98,7 +104,7 @@ Message = {
   id, chatId, seq:number, ts:number, role:'user'|'bot'|'relay'|'system',
   botId?:string, text:string, status:'pending'|'streaming'|'done'|'error'|'pass'|'aborted'|'held',
   parts: ({type:'text',text:string}
-        | {type:'tool',name:string,status:'running'|'ok'|'failed'|'unknown',error?:string}
+        | {type:'tool',name:string,status:'running'|'ok'|'failed'|'unknown',error?:string, summary?:string, args?:string, result?:string}
         | {type:'image', attachment:AttachmentView}
         | {type:'file', attachment:AttachmentView}
         | {type:'event',text:string})[],

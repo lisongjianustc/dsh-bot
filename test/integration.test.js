@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Writable } from 'node:stream'
@@ -168,7 +168,7 @@ function makeHost(t) {
           type: 'tool/call',
           seq: 3,
           time: Date.now(),
-          data: { turn, step: 1, callId: 'call_1', name: 'bash', arguments: '{}' },
+          data: { turn, step: 1, callId: 'call_1', name: 'bash', arguments: '{"command":"echo hi"}' },
         })
         emit('session/event', session, {
           type: 'tool/result',
@@ -176,7 +176,11 @@ function makeHost(t) {
           time: Date.now(),
           // The real Host commits the call id on the tool message, not at the
           // event-data root (`SessionEventMap['tool/result']` has no callId).
-          data: { turn, step: 1, message: { role: 'tool', toolCallId: 'call_1', isError: false } },
+          data: {
+            turn,
+            step: 1,
+            message: { role: 'tool', toolCallId: 'call_1', isError: false, content: [{ type: 'text', text: 'hi\n' }] },
+          },
         })
         emit('session/event', session, {
           type: 'assistant/message',
@@ -409,7 +413,7 @@ test('api: a bot is created through the route and answered by a real turn', asyn
   assert.equal(messages[1].text, 'Hello\n\n done')
   assert.deepEqual(messages[1].parts, [
     { type: 'text', text: 'Hello' },
-    { type: 'tool', name: 'bash', status: 'ok' },
+    { type: 'tool', name: 'bash', status: 'ok', summary: 'echo hi', args: '{"command":"echo hi"}', result: 'hi\n' },
     { type: 'text', text: ' done' },
   ])
   assert.equal(messages[1].status, 'done')
@@ -610,6 +614,67 @@ test('api: a chat can be pinned through the route and the frame reaches SSE', as
   void finished
 })
 
+test('api: the file browser lists, reads and streams only inside the chat roots', async (t) => {
+  const host = makeHost(t)
+  const created = await host.call('POST', '/bot', { body: { action: 'create', bot: { name: 'Alice' } } })
+  const chat = created.body.state.chats[0]
+  const roots = await host.call('GET', `/fs/roots?chatId=${encodeURIComponent(chat.id)}`)
+  assert.equal(roots.status, 200)
+  assert.equal(roots.body.ok, true)
+  assert.equal(roots.body.roots.length >= 1, true)
+  const rootPath = roots.body.roots[0].path
+  mkdirSync(join(rootPath, 'sub'), { recursive: true })
+  writeFileSync(join(rootPath, 'hello.txt'), 'hello file browser')
+  writeFileSync(join(rootPath, 'blob.bin'), Buffer.from([0, 1, 2]))
+  symlinkSync('/etc/passwd', join(rootPath, 'escape.txt'))
+
+  const listed = await host.call('GET', `/fs/list?chatId=${encodeURIComponent(chat.id)}&path=${encodeURIComponent(rootPath)}`)
+  assert.equal(listed.status, 200)
+  assert.equal(listed.body.path, rootPath)
+  const names = listed.body.entries.map(entry => entry.name)
+  assert.equal(names[0], 'sub')
+  assert.ok(names.includes('hello.txt'))
+  assert.equal(names.includes('escape.txt'), false)
+  assert.equal(listed.body.entries[0].type, 'dir')
+
+  const relative = await host.call('GET', `/fs/list?chatId=${encodeURIComponent(chat.id)}&path=${encodeURIComponent('sub')}`)
+  assert.equal(relative.body.entries.length, 0)
+
+  const read = await host.call('GET', `/fs/read?chatId=${encodeURIComponent(chat.id)}&path=${encodeURIComponent(join(rootPath, 'hello.txt'))}`)
+  assert.equal(read.status, 200)
+  assert.equal(read.body.text, 'hello file browser')
+  assert.equal(read.body.mime, 'text/plain')
+
+  const binary = await host.call('GET', `/fs/read?chatId=${encodeURIComponent(chat.id)}&path=${encodeURIComponent(join(rootPath, 'blob.bin'))}`)
+  assert.equal(binary.status, 415)
+  assert.equal(binary.body.code, 'unsupported')
+
+  const raw = streamResponse()
+  const rawDone = new Promise(resolve => raw.on('finish', resolve))
+  await host.route.handler(mockRequest({
+    method: 'GET',
+    url: `/dsh-bot/api/fs/raw?chatId=${encodeURIComponent(chat.id)}&path=${encodeURIComponent(join(rootPath, 'hello.txt'))}`,
+  }), raw)
+  await rawDone
+  assert.equal(raw.status, 200)
+  assert.equal(raw.headers['content-type'], 'text/plain')
+  assert.equal(raw.headers['x-content-type-options'], 'nosniff')
+  assert.equal(raw.body().toString('utf8'), 'hello file browser')
+
+  const outside = await host.call('GET', `/fs/read?chatId=${encodeURIComponent(chat.id)}&path=${encodeURIComponent('/etc/passwd')}`)
+  assert.equal(outside.status, 403)
+  assert.equal(outside.body.code, 'forbidden')
+  const symlink = await host.call('GET', `/fs/read?chatId=${encodeURIComponent(chat.id)}&path=${encodeURIComponent(join(rootPath, 'escape.txt'))}`)
+  assert.equal(symlink.status, 403)
+  assert.equal(symlink.body.code, 'forbidden')
+  const missingChat = await host.call('GET', '/fs/roots')
+  assert.equal(missingChat.status, 400)
+  assert.equal(missingChat.body.code, 'invalid-request')
+  const unknownChat = await host.call('GET', '/fs/roots?chatId=chat_nope')
+  assert.equal(unknownChat.status, 404)
+  assert.equal(unknownChat.body.code, 'chat-not-found')
+})
+
 test('api: a group main directory decides where member sessions are created', async (t) => {
   const host = makeHost(t)
   const alice = (await host.call('POST', '/bot', { body: { action: 'create', bot: { name: 'Alice' } } })).body.state.bots[0]
@@ -742,6 +807,80 @@ test('api: memory and config routes act on the ledger', async (t) => {
 function recalledId(entries) {
   return entries[0].id
 }
+
+test('api: automatic memory writes strong instructions and queues preferences', async (t) => {
+  const host = makeHost(t)
+  const created = await host.call('POST', '/bot', { body: { action: 'create', bot: { name: 'Alice' } } })
+  const chat = created.body.state.chats[0]
+  let botMessages = 0
+  const sendAndWait = async (text) => {
+    await host.call('POST', '/chat', { body: { action: 'send', chatId: chat.id, text } })
+    botMessages += 1
+    assert.ok(await waitFor(async () => {
+      const page = await host.call('GET', `/messages?chatId=${encodeURIComponent(chat.id)}`)
+      return page.body.messages.filter(message => message.role === 'bot' && message.status === 'done').length >= botMessages
+    }))
+  }
+  const memoryList = async () => (await host.call('POST', '/memory', { body: { action: 'list', scope: 'team' } })).body
+
+  // A strong instruction is written automatically.
+  await sendAndWait('请记住：团队统一用中文写文档。')
+  assert.ok(await waitFor(async () => {
+    const listed = await memoryList()
+    return listed.entries.some(entry => entry.auto === true && /中文写文档/.test(entry.text))
+  }))
+
+  // An ordinary preference becomes a candidate, not memory.
+  await sendAndWait('我偏好表格形式的总结，不要太长。')
+  assert.ok(await waitFor(async () => (await memoryList()).candidates.length === 1))
+  const candidate = (await memoryList()).candidates[0]
+  assert.equal(candidate.scope, 'team')
+  assert.equal(candidate.reason, 'user-instruction')
+  assert.equal(typeof candidate.confidence, 'number')
+  assert.equal(candidate.source.chatId, chat.id)
+
+  // Accept turns it into memory; a text override is allowed.
+  const accepted = await host.call('POST', '/memory', { body: { action: 'accept', candidateId: candidate.id, text: '我偏好表格形式的总结' } })
+  assert.equal(accepted.status, 200)
+  assert.equal(accepted.body.entry.text, '我偏好表格形式的总结')
+  assert.equal(accepted.body.candidates.length, 0)
+  assert.ok((await memoryList()).entries.some(entry => entry.text === '我偏好表格形式的总结'))
+
+  // Reject drops the next candidate.
+  await sendAndWait('我偏好短标题。')
+  assert.ok(await waitFor(async () => (await memoryList()).candidates.length === 1))
+  const second = (await memoryList()).candidates[0]
+  const rejected = await host.call('POST', '/memory', { body: { action: 'reject', candidateId: second.id } })
+  assert.equal(rejected.body.candidates.length, 0)
+
+  // Manual edit keeps the revision guard.
+  const written = await host.call('POST', '/memory', { body: { action: 'remember', scope: 'team', text: '原始条目' } })
+  const entry = written.body.entry
+  const conflict = await host.call('POST', '/memory', {
+    body: { action: 'edit', scope: 'team', id: entry.id, text: '被改写的条目', revision: 'not-the-revision' },
+  })
+  assert.equal(conflict.status, 409)
+  assert.equal(conflict.body.code, 'memory-conflict')
+  const edited = await host.call('POST', '/memory', {
+    body: { action: 'edit', scope: 'team', id: entry.id, text: '被改写的条目', revision: entry.revision },
+  })
+  assert.equal(edited.status, 200)
+  assert.equal(edited.body.entry.text, '被改写的条目')
+
+  // The master switch off keeps strong instructions as candidates.
+  const off = await host.call('POST', '/memory/auto', { body: { enabled: false } })
+  assert.equal(off.status, 200)
+  assert.equal(off.body.state.settings.autoMemory, false)
+  await sendAndWait('请记住：团队默认周一发版。')
+  assert.ok(await waitFor(async () => {
+    const listed = await memoryList()
+    return listed.entries.every(entry => !/周一发版/.test(entry.text)) && listed.candidates.some(item => /周一发版/.test(item.text))
+  }))
+  const on = await host.call('POST', '/memory/auto', { body: { enabled: true } })
+  assert.equal(on.body.state.settings.autoMemory, true)
+  const invalid = await host.call('POST', '/memory/auto', { body: { enabled: 'yes' } })
+  assert.equal(invalid.status, 400)
+})
 
 test('api: schedules are created, listed and deleted through the route', async (t) => {
   const host = makeHost(t)

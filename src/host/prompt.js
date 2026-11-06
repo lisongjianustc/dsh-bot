@@ -233,6 +233,9 @@ export function renderMemoryBlock(selection, language = 'zh') {
     selection.omitted > 0
       ? (zh ? `（另有 ${selection.omitted} 条因预算未显示。）` : `(${selection.omitted} more entries omitted for budget.)`)
       : '',
+    selection.entries.some(entry => entry.auto === true)
+      ? (zh ? '（标记 auto:true 的条目是系统自动记录的，可能不准确，用户可以纠正或删除。）' : '(Entries marked auto:true were captured automatically and may be wrong; the user can correct or delete them.)')
+      : '',
     '</dsh-bot-memory>',
   ].filter(Boolean).join('\n')
 }

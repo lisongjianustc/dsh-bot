@@ -54,6 +54,8 @@ const STATUS_BY_CODE = {
   'session-create-failed': 502,
   'ledger-unavailable': 503,
   'session-unavailable': 503,
+  'not-found': 404,
+  unsupported: 415,
   internal: 500,
 }
 

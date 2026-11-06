@@ -108,8 +108,8 @@ node scripts/build-client.mjs
 
 ```sh
 node scripts/build-client.mjs   # src/client/*.js -> lib/client.js
-node --test test/*.test.js      # 169 个 Host 单测
-node scripts/smoke-client.mjs   # 215 项 Client 自检
+node --test test/*.test.js      # 190 个 Host 单测
+node scripts/smoke-client.mjs   # 256 项 Client 自检
 node scripts/verify-live.mjs http://127.0.0.1:<端口>   # 真实 Host 冒烟
 ```
 

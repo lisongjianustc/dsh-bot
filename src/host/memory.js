@@ -141,6 +141,7 @@ function serializeEntry(entry) {
     key: entry.key ?? '',
     revision: entry.revision ?? '',
     pinned: Boolean(entry.pinned),
+    ...(entry.auto === true ? { auto: true } : {}),
     text: neutralizeMarks(String(entry.text ?? '')),
   })
 }
@@ -201,10 +202,11 @@ export function selectMemoryContext(scopedEntries, { query = '', limit = MEMORY_
  * @param {string} input.scope - `team` or a Bot id.
  * @param {string} [input.source] - how it was written.
  * @param {string} [input.by] - which Bot wrote it.
+ * @param {boolean} [input.auto] - whether the engine captured it automatically.
  * @param {number} input.now - epoch milliseconds.
  * @returns {object} the entry.
  */
-export function makeMemoryEntry({ id, text, key, pinned, scope, source, by, now }) {
+export function makeMemoryEntry({ id, text, key, pinned, scope, source, by, auto, now }) {
   const entry = {
     id,
     scope,
@@ -214,6 +216,7 @@ export function makeMemoryEntry({ id, text, key, pinned, scope, source, by, now 
     addedAt: now,
     ...(source === undefined ? {} : { source }),
     ...(by === undefined ? {} : { by }),
+    ...(auto === true ? { auto: true } : {}),
   }
   return { ...entry, revision: entryRevision(entry) }
 }

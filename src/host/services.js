@@ -876,7 +876,7 @@ export function createServices({ ctx, config = {}, store }) {
         bots: Object.fromEntries(Object.entries(db.memory.bots).map(([botId, entries]) => [botId, storageBudget(entries)])),
       }
     },
-    async remember({ scope = 'team', text, key, id, replaceId, pinned, botId, targetBotId, by, source }) {
+    async remember({ scope = 'team', text, key, id, replaceId, pinned, botId, targetBotId, by, source, auto }) {
       const resolved = scope === 'bot' ? (targetBotId ?? botId) : scope
       const entries = scopeEntries(resolved, botId)
       const target = id ?? replaceId
@@ -919,6 +919,7 @@ export function createServices({ ctx, config = {}, store }) {
         scope: resolved,
         ...(source === undefined ? {} : { source }),
         ...(by === undefined ? {} : { by }),
+        ...(auto === true ? { auto: true } : {}),
         now: now(),
       })
       // An entry with the same text and no key adopts the key instead of duplicating.
@@ -969,6 +970,48 @@ export function createServices({ ctx, config = {}, store }) {
     },
     secretReason,
     revisionOf: entryRevision,
+  }
+
+  // ----------------------------------------------------- memory candidates
+  /** The candidate queue cap; the oldest candidate is dropped past it. */
+  const MEMORY_CANDIDATE_MAX = 100
+
+  const memoryCandidates = {
+    list() {
+      return [...db.memoryCandidates]
+    },
+    get(id) {
+      return db.memoryCandidates.find(candidate => candidate.id === String(id ?? ''))
+    },
+    require(id) {
+      const candidate = memoryCandidates.get(id)
+      if (candidate === undefined) throw new BotError('invalid-request', `no memory candidate matches "${String(id ?? '')}"`)
+      return candidate
+    },
+    async add(candidate) {
+      db.memoryCandidates.push(candidate)
+      if (db.memoryCandidates.length > MEMORY_CANDIDATE_MAX) {
+        db.memoryCandidates.splice(0, db.memoryCandidates.length - MEMORY_CANDIDATE_MAX)
+      }
+      await store.save()
+      return candidate
+    },
+    async remove(id) {
+      const index = db.memoryCandidates.findIndex(candidate => candidate.id === String(id ?? ''))
+      if (index < 0) return undefined
+      const [removed] = db.memoryCandidates.splice(index, 1)
+      await store.save()
+      return removed
+    },
+  }
+
+  /** Whether the auto-memory engine may write directly (default true). */
+  const autoMemoryEnabled = () => db.settings.autoMemory !== false
+  /** Set the auto-memory master switch. */
+  const setAutoMemory = async (enabled) => {
+    db.settings.autoMemory = enabled === true
+    await store.save()
+    return db.settings.autoMemory
   }
 
   // ----------------------------------------------------------------- usage
@@ -1395,6 +1438,7 @@ export function createServices({ ctx, config = {}, store }) {
     settings: {
       userName: String(db.settings.userName ?? db.self.name ?? 'owner'),
       language: db.settings.language === 'en' ? 'en' : 'zh',
+      autoMemory: db.settings.autoMemory !== false,
     },
     limits: LIMITS,
     schedules: Object.values(db.schedules).map(scheduleView),
@@ -1489,6 +1533,9 @@ export function createServices({ ctx, config = {}, store }) {
     running: runningApi,
     attachments,
     tasks,
+    memoryCandidates,
+    autoMemoryEnabled,
+    setAutoMemory,
     ensureWorkspace,
     /**
      * The workspace one Bot pins, or undefined when it uses the shared one.

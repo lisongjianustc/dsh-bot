@@ -1,8 +1,13 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
+  TOOL_ARGS_MAX,
+  TOOL_RESULT_MAX,
+  TOOL_SUMMARY_MAX,
   createTurnAccumulator,
   mapTurnEndReason,
+  toolCallSummary,
+  toolResultText,
 } from '../src/host/runtime.js'
 
 test('turn merge: several assistant messages become text parts of one bot message', () => {
@@ -55,6 +60,54 @@ test('turn merge: a live delta is replaced by the committed text', () => {
   accumulator.commitAssistant([{ type: 'text', text: 'Hello there' }])
   assert.equal(accumulator.live, '')
   assert.equal(accumulator.text(), 'Hello there')
+})
+
+test('tool details: a bash call keeps its command summary and raw arguments', () => {
+  assert.equal(toolCallSummary('bash', '{"command":"cd /tmp && ls -la"}'), 'ls -la')
+  assert.equal(toolCallSummary('bash', '{"command":"pwd"}'), 'pwd')
+  assert.equal(toolCallSummary('bash', 'not json at all'), '')
+  const accumulator = createTurnAccumulator({ botId: 'bot_a' })
+  accumulator.addToolCall('call_bash', 'bash', '{"command":"cd /repo && npm test"}')
+  assert.deepEqual(accumulator.parts[0], {
+    type: 'tool',
+    name: 'bash',
+    status: 'running',
+    summary: 'npm test',
+    args: '{"command":"cd /repo && npm test"}',
+  })
+  accumulator.finishTool('call_bash', { ok: true, result: toolResultText([{ type: 'text', text: 'ok\n' }, { type: 'text', text: 'done' }]) })
+  assert.equal(accumulator.parts[0].result, 'ok\n\ndone')
+  assert.equal(accumulator.parts[0].status, 'ok')
+})
+
+test('tool details: read/write/edit summarize by path, web tools by url/query', () => {
+  assert.equal(toolCallSummary('read', '{"path":"/tmp/a.txt"}'), '/tmp/a.txt')
+  assert.equal(toolCallSummary('write', '{"file_path":"/tmp/b.txt"}'), '/tmp/b.txt')
+  assert.equal(toolCallSummary('edit', '{"path":"src/main.js","old":"a","new":"b"}'), 'src/main.js')
+  assert.equal(toolCallSummary('apply_patch', '{"file_path":"/tmp/c.txt"}'), '/tmp/c.txt')
+  assert.equal(toolCallSummary('web_fetch', '{"url":"https://example.com/x"}'), 'https://example.com/x')
+  assert.equal(toolCallSummary('web_search', '{"query":"dsh bot"}'), 'dsh bot')
+  assert.equal(toolCallSummary('bot_list_team', '{}'), '')
+  const accumulator = createTurnAccumulator({ botId: 'bot_a' })
+  accumulator.addToolCall('call_read', 'read', '{"path":"/tmp/a.txt"}')
+  assert.equal(accumulator.parts[0].summary, '/tmp/a.txt')
+})
+
+test('tool details: arguments and results are bounded, a missing result adds no field', () => {
+  const longArgs = JSON.stringify({ command: 'x'.repeat(5000) })
+  assert.equal(toolCallSummary('bash', longArgs).length, TOOL_SUMMARY_MAX)
+  const accumulator = createTurnAccumulator({ botId: 'bot_a' })
+  accumulator.addToolCall('call_1', 'bash', longArgs)
+  assert.equal(accumulator.parts[0].args.length, TOOL_ARGS_MAX)
+  accumulator.finishTool('call_1', { ok: true, result: 'r'.repeat(10000) })
+  assert.equal(accumulator.parts[0].result.length, TOOL_RESULT_MAX)
+  accumulator.addToolCall('call_2', 'read', '{"path":"/tmp/x"}')
+  accumulator.finishTool('call_2', { ok: false, error: 'boom' })
+  assert.equal(Object.hasOwn(accumulator.parts[1], 'result'), false)
+  assert.equal(accumulator.parts[1].error, 'boom')
+  // A call with no known summary and no arguments keeps only the base fields.
+  accumulator.addToolCall('call_3', 'bot_list_team')
+  assert.deepEqual(accumulator.parts[2], { type: 'tool', name: 'bot_list_team', status: 'running' })
 })
 
 test('turn merge: a tool part still running at turn end is settled as failed', () => {

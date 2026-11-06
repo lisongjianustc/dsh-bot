@@ -53,6 +53,9 @@
 | 图片/文件输入（附件→Bot 收到本地路径） | 上传/媒体/parts/路径清单 + composer/气泡卡片，真实回合已读文件 | ✅ |
 | Markdown 渲染（粗体/列表/**表格**/代码/链接） | 完整行内格式 + GFM 表格（对齐/横滚/单元格行内），XSS 安全 | ✅ |
 | 图片/媒体/HTML/MD 预览（沙箱、下载、失败重试） | 仅图片/文件卡片；HTML/MD 沙箱预览 🔜 | 🟡 |
+| 工具调用详情（参数/结果/摘要可见、复制） | ToolRow 收起摘要 + 展开参数/结果 + 失败自动展开 | ✅ |
+| 文件浏览与预览（右侧面板、聊天路径可点） | fs API（roots/list/read/raw，白名单防越界）+ 文本/Markdown/图片预览 | ✅ |
+| 自动记忆（团队/每 Bot，自动形成 + 用户可编辑） | 规则引擎自动写强指令 / 候选队列待确认；edit/accept/reject + 开关 | ✅ |
 | 回复操作（reaction/copy/quote/open session） | copy/quote/open ✅；reaction 🔜 | 🟡 |
 | 表情回应（本地持久、跨窗口同步） | — | 🔜 |
 | 一条回复多气泡（text part / tool part 分段） | parts 渲染 | ✅ |

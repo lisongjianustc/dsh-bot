@@ -226,7 +226,7 @@ function buildDemoState() {
     groups: [group],
     chats: conv,
     running: [],
-    settings: { userName: '我', language: 'zh' },
+    settings: { userName: '我', language: 'zh', autoMemory: true },
     models: {
       providers: [
         {
@@ -376,6 +376,33 @@ function buildDemoMessages(state) {
       botId: chief.id,
       sessionId: 'sess_demo_chief',
     }),
+    msg('chat_b7a1c9d3e5f2', 7, 'bot', '', 'done', {
+      botId: chief.id,
+      sessionId: 'sess_demo_chief',
+      text: '先看一下平衡脚本 `game/balance.gd`，再对照 [设计文档](docs/design.md)。',
+      parts: [
+        {
+          type: 'tool',
+          name: 'bash',
+          status: 'ok',
+          summary: 'ls -la game/ && head -40 game/balance.gd',
+          args: '{"command":"ls -la game/ && head -40 game/balance.gd"}',
+          result: 'total 48\n-rw-r--r--  1 me  staff  2048 game/balance.gd\n-rw-r--r--  1 me  staff  1024 game/player.gd',
+        },
+        {
+          type: 'tool',
+          name: 'write',
+          status: 'failed',
+          summary: 'game/balance.gd',
+          args: '{"path":"game/balance.gd","content":"...","mode":"overwrite"}',
+          error: 'permission denied: the group workspace is read-only for this Bot',
+        },
+        {
+          type: 'text',
+          text: '先看一下平衡脚本 `game/balance.gd`，再对照 [设计文档](docs/design.md)。',
+        },
+      ],
+    }),
   ]
   out['chat_2e6c8a4f0b1d'] = [
     msg('chat_2e6c8a4f0b1d', 1, 'user', '这个插件应该走 main 面板还是 shell.overlay？'),
@@ -420,8 +447,29 @@ function buildDemoMemory(state) {
   var now = Date.now()
   return {
     team: [
-      { id: 'note_team1', scope: 'team', text: '团队周报在每周五 18:00 前发出，由 Chief 汇总。', at: now - 86400000 * 3, pinned: true },
-      { id: 'note_team2', scope: 'team', text: '所有对外文档先由写手起稿，架构师只看技术准确性。', at: now - 86400000 * 2, pinned: false },
+      { id: 'note_team1', scope: 'team', text: '团队周报在每周五 18:00 前发出，由 Chief 汇总。', at: now - 86400000 * 3, pinned: true, auto: false, revision: 'r1' },
+      { id: 'note_team2', scope: 'team', text: '所有对外文档先由写手起稿，架构师只看技术准确性。', at: now - 86400000 * 2, pinned: false, auto: true, revision: 'r2' },
+    ],
+    candidates: [
+      {
+        id: 'cand_1',
+        scope: 'team',
+        text: '发布前把版本号写进 CHANGELOG，并跑一遍冒烟。',
+        reason: '用户在对话里明确要求长期记住这条发布约定',
+        source: { chatId: 'chat_b7a1c9d3e5f2', messageId: 'msg_demo_cand' },
+        confidence: 0.82,
+        createdAt: now - 3600000,
+      },
+      {
+        id: 'cand_2',
+        scope: 'bot',
+        botId: 'bot_5f3a91c2d7e4',
+        text: 'Chief 负责每周五汇总团队周报。',
+        reason: '同一约定在近几轮对话里重复出现',
+        source: { chatId: 'chat_b7a1c9d3e5f2' },
+        confidence: 0.64,
+        createdAt: now - 7200000,
+      },
     ],
     bots: {
       'bot_5f3a91c2d7e4': [
@@ -534,11 +582,23 @@ function createStore() {
     search: '',
     drawer: null,
     drawerTab: 'general',
+    toolExpanded: Object.create(null),
+    fileOpen: false,
+    fileRequest: null,
     leftOpen: false,
     messages: Object.create(null),
     drafts: Object.create(null),
     quotes: Object.create(null),
-    memory: { scope: 'team', botId: null, entries: [], loading: false, error: null, loaded: false },
+    memory: {
+      scope: 'team',
+      botId: null,
+      entries: [],
+      candidates: [],
+      autoMemory: true,
+      loading: false,
+      error: null,
+      loaded: false,
+    },
     schedules: { list: [], loading: false, error: null, loaded: false, unsupported: false },
     usage: { days: 7, view: null, loading: false, error: null, loaded: false },
     toasts: [],
@@ -841,6 +901,7 @@ function createStore() {
       settings: {
         userName: typeof settings.userName === 'string' ? settings.userName : '',
         language: settings.language === 'en' ? 'en' : 'zh',
+        autoMemory: settings.autoMemory !== false,
       },
       models: source.models !== null && typeof source.models === 'object' ? source.models : undefined,
       limits: {
@@ -1585,10 +1646,62 @@ function createStore() {
     notify()
   }
 
+  /* ---------------------------------------------------------- file panel */
+
+  /** Open the right-hand file browser, optionally at one file/directory. */
+  function openFile(path) {
+    store.drawer = null
+    store.fileOpen = true
+    store.fileRequest = { path: typeof path === 'string' ? path : '', nonce: Date.now() }
+    notify()
+  }
+
+  /** Close the file browser. */
+  function closeFile() {
+    store.fileOpen = false
+    notify()
+  }
+
+  /** Toggle the file browser (right rail folder button). */
+  function toggleFile() {
+    if (store.fileOpen) closeFile()
+    else openFile('')
+  }
+
+  function fsRoots(chatId) {
+    return transport.get('fs/roots', { chatId: chatId === undefined || chatId === null ? '' : String(chatId) })
+  }
+
+  function fsList(chatId, path) {
+    return transport.get('fs/list', {
+      chatId: chatId === undefined || chatId === null ? '' : String(chatId),
+      path: path === undefined || path === null ? '' : String(path),
+    })
+  }
+
+  function fsRead(chatId, path) {
+    return transport.get('fs/read', {
+      chatId: chatId === undefined || chatId === null ? '' : String(chatId),
+      path: path === undefined || path === null ? '' : String(path),
+    })
+  }
+
+  /** Document-relative URL of a raw file stream (images/PDF preview). */
+  function fsRawUrl(chatId, path) {
+    return (
+      'dsh-bot/api/fs/raw?chatId=' +
+      encodeURIComponent(chatId === undefined || chatId === null ? '' : String(chatId)) +
+      '&path=' +
+      encodeURIComponent(path === undefined || path === null ? '' : String(path))
+    )
+  }
+
   /* --------------------------------------------------------------- drawer */
 
   function openDrawer(tab) {
     if (typeof tab === 'string' && tab !== '') store.drawerTab = tab
+    // The settings drawer and the file browser share the right edge.
+    store.fileOpen = false
     store.drawer = store.drawerTab
     store.leftOpen = false
     notify()
@@ -2036,6 +2149,8 @@ function createStore() {
         setTimeout(function () {
           var entries = memoryEntriesOf(nextScope, store.memory.botId)
           store.memory.entries = entries === null ? [] : entries.slice()
+          store.memory.candidates = mockDemoMemory === null ? [] : listOf(mockDemoMemory.candidates).slice()
+          store.memory.autoMemory = !(store.data !== null && store.data.settings.autoMemory === false)
           store.memory.loading = false
           store.memory.loaded = true
           notify()
@@ -2052,6 +2167,11 @@ function createStore() {
       function (body) {
         if (disposed) return
         store.memory.entries = arrayOf(body === null || body === undefined ? [] : body.entries)
+        store.memory.candidates = arrayOf(body === null || body === undefined ? [] : body.candidates)
+        if (body !== null && typeof body === 'object' && typeof body.autoMemory === 'boolean') {
+          store.memory.autoMemory = body.autoMemory
+          if (store.data !== null) store.data.settings.autoMemory = body.autoMemory
+        }
         store.memory.loading = false
         store.memory.loaded = true
         store.memory.error = null
@@ -2062,6 +2182,156 @@ function createStore() {
         store.memory.loading = false
         store.memory.error = error
         notify()
+      },
+    )
+  }
+
+  /** Apply an entries/candidates envelope returned by one memory action. */
+  function applyMemoryResult(scope, botId, body) {
+    if (body === null || typeof body !== 'object') return
+    if (Array.isArray(body.entries) && store.memory.scope === scope && store.memory.botId === botId) {
+      store.memory.entries = body.entries
+    }
+    if (Array.isArray(body.candidates)) store.memory.candidates = body.candidates
+    store.memory.loaded = true
+    notify()
+  }
+
+  /**
+   * Edit one memory entry (text and/or pinned), guarded by the revision the
+   * panel read. A conflict surfaces as a `memory-conflict` Host error.
+   */
+  function memoryEdit(scope, entryId, text, revision, extra) {
+    var nextScope = scope === 'bot' ? 'bot' : 'team'
+    var value = typeof text === 'string' ? text : undefined
+    var options = extra === undefined || extra === null ? {} : extra
+    if (store.mode === 'mock') {
+      var list = memoryEntriesOf(nextScope, store.memory.botId)
+      if (list === null) return Promise.resolve()
+      var entry = null
+      for (var i = 0; i < list.length; i += 1) if (list[i] !== null && list[i].id === entryId) entry = list[i]
+      if (entry === null) return Promise.reject(new Error('memory-not-found'))
+      if (typeof revision === 'string' && entry.revision !== undefined && revision !== entry.revision) {
+        var conflict = new Error('memory-conflict')
+        conflict.code = 'memory-conflict'
+        return Promise.reject(conflict)
+      }
+      if (value !== undefined) entry.text = value
+      if (typeof options.pinned === 'boolean') entry.pinned = options.pinned
+      entry.revision = 'r' + String(Date.now())
+      notify()
+      return Promise.resolve(entry)
+    }
+    var body = { action: 'edit', scope: nextScope, id: entryId }
+    if (value !== undefined) body.text = value
+    if (typeof revision === 'string') body.revision = revision
+    if (typeof options.pinned === 'boolean') body.pinned = options.pinned
+    if (store.memory.botId !== null) body.targetBotId = store.memory.botId
+    return transport.post('memory', body).then(
+      function (answer) {
+        applyMemoryResult(nextScope, store.memory.botId, answer)
+        return answer !== null && typeof answer === 'object' ? answer.entry : undefined
+      },
+      function (error) {
+        store.memory.error = error
+        notify()
+        throw error
+      },
+    )
+  }
+
+  /** Accept one auto-memory candidate, optionally with edited text. */
+  function memoryAccept(candidateId, text) {
+    if (store.mode === 'mock') {
+      if (mockDemoMemory === null) return Promise.resolve()
+      var queue = listOf(mockDemoMemory.candidates)
+      var index = -1
+      for (var i = 0; i < queue.length; i += 1) if (queue[i] !== null && queue[i].id === candidateId) index = i
+      if (index < 0) return Promise.reject(new Error('memory-candidate-not-found'))
+      var candidate = queue[index]
+      queue.splice(index, 1)
+      var entryText = typeof text === 'string' && text.trim() !== '' ? text.trim() : candidate.text
+      var targetScope = candidate.scope === 'bot' ? 'bot' : 'team'
+      var targetList =
+        targetScope === 'bot'
+          ? mockDemoMemory.bots[candidate.botId === undefined ? '__none' : candidate.botId]
+          : mockDemoMemory.team
+      if (targetList === undefined && targetScope === 'bot') {
+        mockDemoMemory.bots[candidate.botId] = []
+        targetList = mockDemoMemory.bots[candidate.botId]
+      }
+      targetList.push({
+        id: makeId('note'),
+        scope: targetScope,
+        targetBotId: targetScope === 'bot' ? candidate.botId : undefined,
+        text: entryText,
+        at: Date.now(),
+        pinned: false,
+        auto: true,
+        revision: 'r' + String(Date.now()),
+      })
+      store.memory.candidates = queue.slice()
+      return loadMemory(store.memory.scope, store.memory.botId, true)
+    }
+    var body = { action: 'accept', candidateId: candidateId }
+    if (typeof text === 'string' && text.trim() !== '') body.text = text.trim()
+    return transport.post('memory', body).then(
+      function (answer) {
+        applyMemoryResult(store.memory.scope, store.memory.botId, answer)
+        return answer !== null && typeof answer === 'object' ? answer.entry : undefined
+      },
+      function (error) {
+        store.memory.error = error
+        notify()
+        throw error
+      },
+    )
+  }
+
+  /** Ignore one auto-memory candidate. */
+  function memoryReject(candidateId) {
+    if (store.mode === 'mock') {
+      if (mockDemoMemory === null) return Promise.resolve()
+      var queue = listOf(mockDemoMemory.candidates)
+      var next = []
+      for (var i = 0; i < queue.length; i += 1) if (queue[i] !== null && queue[i].id !== candidateId) next.push(queue[i])
+      mockDemoMemory.candidates = next
+      store.memory.candidates = next.slice()
+      notify()
+      return Promise.resolve()
+    }
+    return transport.post('memory', { action: 'reject', candidateId: candidateId }).then(
+      function (answer) {
+        applyMemoryResult(store.memory.scope, store.memory.botId, answer)
+      },
+      function (error) {
+        store.memory.error = error
+        notify()
+        throw error
+      },
+    )
+  }
+
+  /** Flip the auto-memory master switch (`POST /memory/auto`). */
+  function setAutoMemory(enabled) {
+    var next = enabled === true
+    if (store.mode === 'mock') {
+      store.memory.autoMemory = next
+      if (store.data !== null) store.data.settings.autoMemory = next
+      notify()
+      return Promise.resolve(next)
+    }
+    return transport.post('memory/auto', { enabled: next }).then(
+      function (body) {
+        store.memory.autoMemory = next
+        if (body !== null && typeof body === 'object' && body.state !== undefined) applyState(body.state, revisionOf(body.state, body), 'get')
+        if (store.data !== null) store.data.settings.autoMemory = next
+        notify()
+        return next
+      },
+      function (error) {
+        notify()
+        throw error
       },
     )
   }
@@ -2455,6 +2725,13 @@ function createStore() {
   store.setFilter = setFilter
   store.setSearch = setSearch
   store.toggleLeft = toggleLeft
+  store.openFile = openFile
+  store.closeFile = closeFile
+  store.toggleFile = toggleFile
+  store.fsRoots = fsRoots
+  store.fsList = fsList
+  store.fsRead = fsRead
+  store.fsRawUrl = fsRawUrl
   store.openDrawer = openDrawer
   store.setDrawerTab = setDrawerTab
   store.closeDrawer = closeDrawer
@@ -2483,6 +2760,10 @@ function createStore() {
   store.clearGroupNote = clearGroupNote
 
   store.loadMemory = loadMemory
+  store.memoryEdit = memoryEdit
+  store.memoryAccept = memoryAccept
+  store.memoryReject = memoryReject
+  store.setAutoMemory = setAutoMemory
   store.remember = remember
   store.forget = forget
   store.loadSchedules = loadSchedules

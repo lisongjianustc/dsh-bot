@@ -43,8 +43,24 @@ function isBlockStart(line) {
   return false
 }
 
+/**
+ * Whether a string looks like a local file reference the workbench can open.
+ * Absolute and relative POSIX paths, plus bare filenames with an extension.
+ * Anything with a URL scheme, and prose with spaces, is left alone.
+ */
+function isFilePath(value) {
+  var text = String(value === undefined || value === null ? '' : value).trim()
+  if (text === '') return false
+  if (/^[a-z][a-z0-9+.-]*:/i.test(text)) return false
+  if (/\s/.test(text)) return false
+  if (text.indexOf('/') >= 0) return true
+  if (/^[^/\\]+\.[A-Za-z][A-Za-z0-9]{0,7}$/.test(text)) return true
+  return false
+}
+
 /** Parse one line of inline Markdown into React nodes. */
-function inlineNodes(text, keyPrefix) {
+function inlineNodes(text, keyPrefix, options) {
+  var opts = options === undefined || options === null ? {} : options
   var source = String(text === undefined || text === null ? '' : text)
   var nodes = []
   var buffer = ''
@@ -71,13 +87,32 @@ function inlineNodes(text, keyPrefix) {
     if (char === '`') {
       var codeEnd = source.indexOf('`', index + 1)
       if (codeEnd > index + 1) {
-        push(
-          h(
-            'code',
-            { key: prefix + '-code-' + index, className: 'db-md-code-inline' },
-            source.slice(index + 1, codeEnd),
-          ),
-        )
+        var codeText = source.slice(index + 1, codeEnd)
+        if (typeof opts.fileLink === 'function' && isFilePath(codeText)) {
+          push(
+            h(
+              'button',
+              {
+                key: prefix + '-file-' + index,
+                type: 'button',
+                className: 'db-md-file db-md-code-inline',
+                title: codeText.trim(),
+                onClick: function () {
+                  opts.fileLink(codeText.trim())
+                },
+              },
+              codeText,
+            ),
+          )
+        } else {
+          push(
+            h(
+              'code',
+              { key: prefix + '-code-' + index, className: 'db-md-code-inline' },
+              codeText,
+            ),
+          )
+        }
         index = codeEnd + 1
         continue
       }
@@ -94,7 +129,7 @@ function inlineNodes(text, keyPrefix) {
           h(
             'strong',
             { key: prefix + '-b-' + index },
-            inlineNodes(source.slice(index + 2, boldEnd), prefix + '-b' + index),
+            inlineNodes(source.slice(index + 2, boldEnd), prefix + '-b' + index, opts),
           ),
         )
         index = boldEnd + 2
@@ -110,7 +145,7 @@ function inlineNodes(text, keyPrefix) {
           h(
             'del',
             { key: prefix + '-d-' + index },
-            inlineNodes(source.slice(index + 2, strikeEnd), prefix + '-d' + index),
+            inlineNodes(source.slice(index + 2, strikeEnd), prefix + '-d' + index, opts),
           ),
         )
         index = strikeEnd + 2
@@ -132,7 +167,7 @@ function inlineNodes(text, keyPrefix) {
             h(
               'em',
               { key: prefix + '-em-' + index },
-              inlineNodes(source.slice(index + 1, italicEnd), prefix + '-em' + index),
+              inlineNodes(source.slice(index + 1, italicEnd), prefix + '-em' + index, opts),
             ),
           )
           index = italicEnd + 1
@@ -148,7 +183,27 @@ function inlineNodes(text, keyPrefix) {
         var urlEnd = source.indexOf(')', labelEnd + 2)
         if (urlEnd > labelEnd + 2) {
           var label = source.slice(index + 1, labelEnd)
-          var href = safeUrl(source.slice(labelEnd + 2, urlEnd))
+          var rawHref = source.slice(labelEnd + 2, urlEnd).trim()
+          var href = safeUrl(rawHref)
+          if (href === '' && typeof opts.fileLink === 'function' && isFilePath(rawHref)) {
+            push(
+              h(
+                'button',
+                {
+                  key: prefix + '-filea-' + index,
+                  type: 'button',
+                  className: 'db-md-file',
+                  title: rawHref,
+                  onClick: function () {
+                    opts.fileLink(rawHref)
+                  },
+                },
+                inlineNodes(label, prefix + '-fal' + index, opts),
+              ),
+            )
+            index = urlEnd + 1
+            continue
+          }
           if (href !== '') {
             push(
               h(
@@ -160,7 +215,7 @@ function inlineNodes(text, keyPrefix) {
                   target: '_blank',
                   rel: 'noopener noreferrer',
                 },
-                inlineNodes(label, prefix + '-al' + index),
+                inlineNodes(label, prefix + '-al' + index, opts),
               ),
             )
             index = urlEnd + 1
@@ -284,7 +339,7 @@ function alignClass(alignment) {
 }
 
 /** Render one GFM table starting at `lines[start]`, or null when it is not one. */
-function renderTable(lines, start, keyName) {
+function renderTable(lines, start, keyName, options) {
   if (start + 1 >= lines.length) return null
   if (String(lines[start]).indexOf('|') < 0) return null
   var headerCells = splitTableRow(lines[start])
@@ -305,7 +360,7 @@ function renderTable(lines, start, keyName) {
       h(
         'th',
         { key: 'th-' + hi, className: alignClass(alignments[hi]), scope: 'col' },
-        inlineNodes(headerCells[hi], keyName + '-th' + hi),
+        inlineNodes(headerCells[hi], keyName + '-th' + hi, options),
       ),
     )
   }
@@ -317,7 +372,7 @@ function renderTable(lines, start, keyName) {
         h(
           'td',
           { key: 'td-' + r + '-' + c, className: alignClass(alignments[c]) },
-          inlineNodes(rows[r][c], keyName + '-td' + r + '-' + c),
+          inlineNodes(rows[r][c], keyName + '-td' + r + '-' + c, options),
         ),
       )
     }
@@ -344,7 +399,8 @@ function renderTable(lines, start, keyName) {
  * @param cursorClass when set, a streaming cursor span is appended to the last block.
  * @returns array of React elements (empty for blank input).
  */
-function render(text, cursorClass) {
+function render(text, cursorClass, options) {
+  var opts = options === undefined || options === null ? {} : options
   var source = normalize(text)
   var lines = source.split('\n')
   var blocks = []
@@ -398,7 +454,7 @@ function render(text, cursorClass) {
         h(
           'div',
           { key: nextKey('h'), className: 'db-md-h db-md-h' + level },
-          inlineNodes(heading[2].replace(/\s+#+\s*$/, ''), 'h' + level),
+          inlineNodes(heading[2].replace(/\s+#+\s*$/, ''), 'h' + level, opts),
         ),
       )
       index += 1
@@ -420,7 +476,7 @@ function render(text, cursorClass) {
         index += 1
       }
       blocks.push(
-        h('blockquote', { key: nextKey('q'), className: 'db-md-quote' }, inlineNodes(quoted.join('\n'), 'q')),
+        h('blockquote', { key: nextKey('q'), className: 'db-md-quote' }, inlineNodes(quoted.join('\n'), 'q', opts)),
       )
       continue
     }
@@ -441,7 +497,7 @@ function render(text, cursorClass) {
           index += 1
         }
         var itemText = continuation.length === 0 ? content : content + '\n' + continuation.join('\n')
-        items.push(h('li', { key: 'li-' + items.length, className: 'db-md-li' }, inlineNodes(itemText, 'li' + items.length)))
+        items.push(h('li', { key: 'li-' + items.length, className: 'db-md-li' }, inlineNodes(itemText, 'li' + items.length, opts)))
       }
       blocks.push(
         h(
@@ -457,7 +513,7 @@ function render(text, cursorClass) {
     // separator the lines stay ordinary paragraph text, so `a | b` never turns
     // into a table by accident.
     var tableKey = nextKey('table')
-    var table = renderTable(lines, index, tableKey)
+    var table = renderTable(lines, index, tableKey, opts)
     if (table !== null) {
       table.element = React.cloneElement(table.element, { key: tableKey + '-wrap' })
       blocks.push(table.element)
@@ -472,7 +528,7 @@ function render(text, cursorClass) {
       paragraph.push(lines[index])
       index += 1
     }
-    blocks.push(h('p', { key: nextKey('p'), className: 'db-md-p' }, inlineNodes(paragraph.join('\n'), 'p')))
+    blocks.push(h('p', { key: nextKey('p'), className: 'db-md-p' }, inlineNodes(paragraph.join('\n'), 'p', opts)))
   }
 
   if (cursorClass !== undefined && cursorClass !== null && blocks.length > 0) {
@@ -484,4 +540,4 @@ function render(text, cursorClass) {
   return blocks
 }
 
-module.exports = { render: render, inlineNodes: inlineNodes }
+module.exports = { render: render, inlineNodes: inlineNodes, isFilePath: isFilePath }

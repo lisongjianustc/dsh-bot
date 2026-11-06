@@ -377,6 +377,114 @@ const gridHtml = renderToStaticMarkup(React.createElement(panelsModule.AvatarGri
 check((gridHtml.match(/class="db-avatar-choice(?: is-active)?"/g) || []).length === 40, 'the avatar picker renders 40 chooseable tiles')
 check((gridHtml.match(/dsh-bot\/api\/avatar\//g) || []).length === 40, 'every picker tile loads its Host SVG')
 
+/* ------------------------------------------------------ tool rows & files */
+
+const chatModule = loadClientModule('chat.js')
+const filesModule = loadClientModule('files.js')
+const fileBase = {
+  roots: [{ title: 'game', path: '/root/game' }],
+  rootPath: '/root/game',
+  rootTitle: 'game',
+  currentPath: '/root/game/docs',
+  entries: [
+    { name: 'sub', path: '/root/game/docs/sub', type: 'dir' },
+    { name: 'a.md', path: '/root/game/docs/a.md', type: 'file', size: 12 },
+  ],
+  preview: null,
+}
+const filePanelHtml = renderToStaticMarkup(
+  React.createElement(filesModule.FilePanel, { t: tFromBundle, store: Object.assign({}, fakeStore, { fileOpen: true, selectedChatId: 'chat_smoke' }), initial: fileBase }),
+)
+check(filePanelHtml.includes('文件') && filePanelHtml.includes('game'), 'the file panel renders its title, root and breadcrumbs')
+check(filePanelHtml.includes('sub') && filePanelHtml.includes('a.md') && filePanelHtml.includes('is-dir'), 'the file panel lists directories before files')
+check(filePanelHtml.includes('db-file-crumb'), 'the panel shows a clickable breadcrumb trail')
+const textPreview = renderToStaticMarkup(
+  React.createElement(filesModule.FilePanel, {
+    t: tFromBundle,
+    store: Object.assign({}, fakeStore, { fileOpen: true, selectedChatId: 'chat_smoke' }),
+    initial: Object.assign({}, fileBase, { preview: { kind: 'text', path: '/root/game/docs/a.gd', text: 'line one\nline two', size: 14 } }),
+  }),
+)
+check(textPreview.includes('line one') && textPreview.includes('db-file-line-no') && textPreview.includes('2'), 'a text preview shows numbered lines')
+const imagePreview = renderToStaticMarkup(
+  React.createElement(filesModule.FilePanel, {
+    t: tFromBundle,
+    store: Object.assign({}, fakeStore, { fileOpen: true, selectedChatId: 'chat_smoke' }),
+    initial: Object.assign({}, fileBase, { preview: { kind: 'image', path: '/root/game/p.png', name: 'p.png', url: 'dsh-bot/api/fs/raw?chatId=c&path=%2Froot%2Fgame%2Fp.png' } }),
+  }),
+)
+check(imagePreview.includes('<img') && imagePreview.includes('dsh-bot/api/fs/raw'), 'an image preview uses the raw file route')
+const markdownPreview = renderToStaticMarkup(
+  React.createElement(filesModule.FilePanel, {
+    t: tFromBundle,
+    store: Object.assign({}, fakeStore, { fileOpen: true, selectedChatId: 'chat_smoke' }),
+    initial: Object.assign({}, fileBase, { preview: { kind: 'markdown', path: '/root/game/docs/a.md', text: '# 标题\n\n**粗体**' } }),
+  }),
+)
+check(markdownPreview.includes('db-md-h1') && markdownPreview.includes('<strong>粗体</strong>'), 'Markdown files preview through the shared renderer')
+const binaryPreview = renderToStaticMarkup(
+  React.createElement(filesModule.FilePanel, {
+    t: tFromBundle,
+    store: Object.assign({}, fakeStore, { fileOpen: true, selectedChatId: 'chat_smoke' }),
+    initial: Object.assign({}, fileBase, { preview: { kind: 'binary', path: '/root/game/a.bin', url: 'dsh-bot/api/fs/raw?chatId=c&path=%2Froot%2Fgame%2Fa.bin' } }),
+  }),
+)
+check(binaryPreview.includes('不支持预览') && binaryPreview.includes('打开 / 下载'), 'a binary file offers its raw download instead of a broken preview')
+const errorPanel = renderToStaticMarkup(
+  React.createElement(filesModule.FilePanel, {
+    t: tFromBundle,
+    store: Object.assign({}, fakeStore, { fileOpen: true, selectedChatId: 'chat_smoke' }),
+    initial: Object.assign({}, fileBase, { error: '没有权限访问这个路径' }),
+  }),
+)
+check(errorPanel.includes('没有权限访问这个路径'), 'a permission error is shown inside the file panel')
+const noRootsPanel = renderToStaticMarkup(
+  React.createElement(filesModule.FilePanel, {
+    t: tFromBundle,
+    store: Object.assign({}, fakeStore, { fileOpen: true, selectedChatId: 'chat_smoke' }),
+    initial: { roots: [], rootsError: '没有可浏览的目录' },
+  }),
+)
+check(noRootsPanel.includes('没有可浏览的目录'), 'a Host without fs routes degrades to a readable empty state')
+check(filesModule.dirname('/root/game/docs/a.md') === '/root/game/docs', 'dirname splits a file path')
+check(filesModule.breadcrumbOf('/root/game', '/root/game/docs/a', 'game').length === 3, 'breadcrumbs split the path inside the root')
+check(filesModule.sortEntries([{ name: 'z.md', type: 'file' }, { name: 'adir', type: 'dir' }])[0].name === 'adir', 'directories sort before files')
+check(filesModule.fileKind('a.md', 'file') === 'markdown' && filesModule.fileKind('a.png', 'file') === 'image' && filesModule.fileKind('a.bin', 'file') === 'binary', 'file icons/preview route by extension')
+
+const fakeRowStore = {
+  data: { settings: { userName: '我' } },
+  botById: () => undefined,
+  flash() {},
+  openFile() {},
+  toolExpanded: Object.create(null),
+}
+function toolRowHtml(parts, store) {
+  return renderToStaticMarkup(
+    React.createElement(chatModule.MessageRow, {
+      t: tFromBundle,
+      store: store,
+      chat: { id: 'chat_smoke' },
+      message: { id: 'msg_tools', chatId: 'chat_smoke', seq: 1, ts: 1, role: 'bot', status: 'done', text: '', parts: parts },
+      onQuote() {},
+    }),
+  )
+}
+const summaryRow = toolRowHtml([{ type: 'tool', name: 'bash', status: 'ok', summary: 'ls -la /tmp' }], fakeRowStore)
+check(summaryRow.includes('ls -la /tmp') && summaryRow.includes('db-tool-summary'), 'a collapsed tool row shows the Host summary')
+const expandedStore = Object.assign({}, fakeRowStore, { toolExpanded: { 'msg_tools:0': true } })
+const expandedRow = toolRowHtml(
+  [{ type: 'tool', name: 'bash', status: 'ok', summary: 'ls', args: '{\"cmd\":\"ls\"}', result: 'file-a\nfile-b' }],
+  expandedStore,
+)
+check(expandedRow.includes('db-tool-detail') && expandedRow.includes('&quot;cmd&quot;') && expandedRow.includes('file-a'), 'expanding a tool row reveals formatted args and result')
+check(expandedRow.includes('aria-label="复制"'), 'args and result carry their copy control')
+const failedRow = toolRowHtml([{ type: 'tool', name: 'bash', status: 'failed', error: 'exit 1: boom' }], fakeRowStore)
+check(failedRow.includes('read_workspace') === false && failedRow.includes('exit 1: boom') && failedRow.includes('db-tool-error'), 'a failed tool row opens by itself with its error')
+const bareRow = toolRowHtml([{ type: 'tool', name: 'read_workspace', status: 'ok' }], fakeRowStore)
+check(bareRow.includes('read_workspace') && !bareRow.includes('db-tool-detail'), 'a legacy tool part without args/result still renders')
+const linkedRow = toolRowHtml([{ type: 'text', text: '看 `game/balance.gd` 与 [配置](docs/a.md)' }], fakeRowStore)
+check(linkedRow.includes('db-md-file') && linkedRow.includes('title="game/balance.gd"'), 'file references in chat text render as file links')
+
 /* ------------------------------------------------------------- stub cordis */
 
 const dictionaries = {}
@@ -661,6 +769,43 @@ const smokeMemory = store.memory.entries.find((entry) => entry.text.includes('�
 await store.forget(smokeMemory.id)
 check(!store.memory.entries.some((entry) => entry.id === smokeMemory.id), 'forget removes it again')
 
+// Task-23: auto-memory switch, pending candidates, entry editing.
+store.openDrawer('memory')
+await sleep(120)
+const memoryTabHtml = render(mainReg.component, face)
+check(memoryTabHtml.includes('自动记忆') && memoryTabHtml.includes('待确认记忆'), 'the memory tab shows the auto switch and the pending candidates')
+check(memoryTabHtml.includes('版本号写进 CHANGELOG'), 'pending candidates render their text')
+check(memoryTabHtml.includes('接受') && memoryTabHtml.includes('编辑后接受') && memoryTabHtml.includes('忽略'), 'candidates offer accept, edit-accept and ignore')
+check(memoryTabHtml.includes('自动'), 'auto-written entries carry the auto badge')
+await store.setAutoMemory(false)
+check(store.memory.autoMemory === false && store.data.settings.autoMemory === false, 'the auto-memory switch updates the snapshot')
+await store.setAutoMemory(true)
+check(store.memory.autoMemory === true, 'the auto-memory switch can be turned back on')
+await store.loadMemory('team', null, true)
+const teamEntry = store.memory.entries.find((entry) => entry.id === 'note_team1')
+await store.memoryEdit('team', 'note_team1', '改后的团队约定', teamEntry.revision)
+check(store.memory.entries.find((entry) => entry.id === 'note_team1').text === '改后的团队约定', 'memoryEdit saves the edited text')
+let memoryConflict
+try {
+  await store.memoryEdit('team', 'note_team1', '过期写入', 'r1')
+} catch (error) {
+  memoryConflict = error
+}
+check(memoryConflict !== undefined && (memoryConflict.code === 'memory-conflict' || memoryConflict.message === 'memory-conflict'), 'a stale revision surfaces a conflict')
+const currentTeamEntry = store.memory.entries.find((entry) => entry.id === 'note_team1')
+await store.memoryEdit('team', 'note_team1', undefined, currentTeamEntry.revision, { pinned: true })
+check(store.memory.entries.find((entry) => entry.id === 'note_team1').pinned === true, 'memoryEdit can toggle the pinned flag')
+const acceptedBefore = store.memory.candidates.length
+await store.memoryAccept('cand_1')
+check(store.memory.candidates.length === acceptedBefore - 1, 'accepting a candidate drops it from the queue')
+check(store.memory.entries.some((entry) => entry.text.includes('版本号写进 CHANGELOG') && entry.auto === true), 'an accepted candidate becomes an auto memory entry')
+await store.memoryReject('cand_2')
+check(store.memory.candidates.length === 0, 'ignoring the last candidate empties the queue')
+const memoryTabAfter = render(mainReg.component, face)
+check(memoryTabAfter.includes('暂无待确认记忆'), 'the empty candidate state renders after accepting/ignoring')
+store.closeDrawer()
+
+
 store.openDrawer('schedules')
 await sleep(120)
 const schedulesBefore = store.schedules.list.length
@@ -786,7 +931,10 @@ const liveState = {
     },
   ],
   running: [],
-  settings: { userName: '林', language: 'zh' },
+  settings: { userName: '林', language: 'zh', autoMemory: true },
+  memoryCandidates: [
+    { id: 'cand_live', scope: 'team', text: '线上候选记忆', reason: '重复出现', source: { chatId: 'chat_111111111111' }, confidence: 0.7, createdAt: 5 },
+  ],
   limits: { maxHops: 6, memoryEntryMax: 6000, memoryStorageMax: 64000, groupNoteMax: 4000 },
   workspaces: [
     { id: 'ws_live_1', title: 'dsh-bot workspace', path: '/tmp/dsh-bot' },
@@ -905,6 +1053,14 @@ globalThis.fetch = (url, init = {}) => {
   if (path.includes('/upload')) {
     return jsonResponse({ ok: true, attachment: { id: 'att_live_1', name: 'live.png', size: 64, mime: 'image/png', url: 'dsh-bot/api/media?id=att_live_1' } })
   }
+  if (path.includes('/fs/roots')) return jsonResponse({ ok: true, roots: [{ title: 'game', path: '/root/game' }] })
+  if (path.includes('/fs/list')) {
+    const fsUrl = new URL('http://x/' + path)
+    const wanted = fsUrl.searchParams.get('path')
+    if (wanted === '/forbidden') return jsonResponse({ ok: false, code: 'forbidden', message: 'outside the roots' }, 403)
+    return jsonResponse({ ok: true, path: wanted === '' ? '/root/game' : wanted, entries: [{ name: 'docs', path: '/root/game/docs', type: 'dir' }, { name: 'a.gd', path: '/root/game/a.gd', type: 'file', size: 12 }] })
+  }
+  if (path.includes('/fs/read')) return jsonResponse({ ok: true, path: '/root/game/docs/a.md', mime: 'text/markdown', size: 12, text: '# hi' })
   if (method === 'GET' && path.includes('/state')) return jsonResponse({ ok: true, state: liveState })
   if (method === 'GET' && path.includes('/messages')) {
     const chatId = new URL('http://x/' + path).searchParams.get('chatId')
@@ -942,8 +1098,30 @@ globalThis.fetch = (url, init = {}) => {
     if (action === 'retry') return jsonResponse({ ok: true, state: liveState, chat: liveState.chats[0] })
     return jsonResponse({ ok: true, state: liveState })
   }
+  if (path.includes('/memory/auto')) {
+    liveState.settings.autoMemory = body.enabled === true
+    return jsonResponse({ ok: true, state: liveState })
+  }
   if (path.includes('/memory')) {
-    if (action === 'list') return jsonResponse({ ok: true, entries: [{ id: 'note_live', text: '线上记忆', addedAt: 1234, pinned: false }] })
+    const liveCandidates = liveState.memoryCandidates === undefined ? [] : liveState.memoryCandidates
+    if (action === 'list') {
+      return jsonResponse({
+        ok: true,
+        entries: [{ id: 'note_live', text: '线上记忆', addedAt: 1234, pinned: false, scope: 'team', revision: 'rev-live' }],
+        candidates: liveCandidates,
+        autoMemory: liveState.settings.autoMemory !== false,
+      })
+    }
+    if (action === 'edit') {
+      return jsonResponse({ ok: true, entry: { id: body.id, text: body.text, revision: 'rev-live-2' }, entries: [{ id: 'note_live', text: body.text, addedAt: 1234, pinned: body.pinned === true, scope: 'team', revision: 'rev-live-2' }], candidates: liveCandidates })
+    }
+    if (action === 'accept') {
+      const kept = liveCandidates.filter((candidate) => candidate.id !== body.candidateId)
+      return jsonResponse({ ok: true, entry: { id: 'note_accepted', text: body.text === undefined ? '候选内容' : body.text, auto: true }, entries: [{ id: 'note_accepted', text: body.text === undefined ? '候选内容' : body.text, auto: true, scope: 'team' }], candidates: kept })
+    }
+    if (action === 'reject') {
+      return jsonResponse({ ok: true, candidates: liveCandidates.filter((candidate) => candidate.id !== body.candidateId) })
+    }
     return jsonResponse({ ok: true, entries: [{ id: 'note_live2', text: '新记忆', addedAt: 5678, pinned: false }] })
   }
   if (path.includes('/usage')) {
@@ -1134,6 +1312,49 @@ const groupUpdateCall = fetchCalls.filter((call) => call.path.includes('/group')
 check(groupUpdateCall !== undefined && Array.isArray(groupUpdateCall.body.group.workspaces) && groupUpdateCall.body.group.workspaces.length === 2, 'a group update sends the workspaces array')
 check(groupUpdateCall !== undefined && groupUpdateCall.body.resetSessions === true, 'resetSessions travels beside the group draft')
 check(groupUpdateCall !== undefined && groupUpdateCall.body.group.resetSessions === true, 'the group draft carries resetSessions too for hosts that read it there')
+
+check(typeof store.openFile === 'function' && typeof store.fsRoots === 'function', 'the store exposes the file panel controls')
+store.openFile('/root/game/docs/a.md')
+check(store.fileOpen === true && store.fileRequest.path === '/root/game/docs/a.md', 'openFile records the requested path')
+store.openDrawer('memory')
+check(store.fileOpen === false, 'opening the settings drawer closes the file panel')
+store.closeDrawer()
+store.toggleFile()
+check(store.fileOpen === true, 'the rail button toggles the file panel open')
+store.closeFile()
+check(store.fileOpen === false, 'closeFile closes the file panel')
+const fsRootsView = await store.fsRoots('chat_111111111111')
+check(fsRootsView.roots.length === 1 && fsRootsView.roots[0].path === '/root/game', 'fsRoots reads the Host roots')
+const fsListing = await store.fsList('chat_111111111111', '/root/game')
+check(fsListing.entries.length === 2 && fsListing.path === '/root/game', 'fsList reads a directory')
+const fsReadView = await store.fsRead('chat_111111111111', '/root/game/docs/a.md')
+check(fsReadView.text === '# hi' && fsReadView.mime === 'text/markdown', 'fsRead returns the text preview payload')
+check(store.fsRawUrl('chat_111111111111', '/root/game/p.png').indexOf('dsh-bot/api/fs/raw?chatId=chat_111111111111&path=') === 0, 'fsRawUrl encodes the raw file stream URL')
+let fsForbidden
+try {
+  await store.fsList('chat_111111111111', '/forbidden')
+} catch (error) {
+  fsForbidden = error
+}
+check(fsForbidden !== undefined && fsForbidden.status === 403, 'an out-of-root path surfaces the Host 403')
+
+await store.loadMemory('team', null, true)
+check(store.memory.candidates.length === 1 && store.memory.candidates[0].text === '线上候选记忆', 'loadMemory keeps the pending candidates')
+check(store.memory.autoMemory === true, 'the auto-memory flag comes from the Host list answer')
+await store.setAutoMemory(false)
+check(store.memory.autoMemory === false && liveState.settings.autoMemory === false, 'setAutoMemory posts to /memory/auto')
+await store.setAutoMemory(true)
+const liveEdited = await store.memoryEdit('team', 'note_live', '线上改后', 'rev-live')
+check(store.memory.entries.length === 1 && store.memory.entries[0].text === '线上改后', 'memoryEdit applies the Host answer')
+const liveEditCall = fetchCalls.filter((call) => call.path.includes('/memory') && call.body !== undefined && call.body.action === 'edit').pop()
+check(liveEditCall !== undefined && liveEditCall.body.revision === 'rev-live' && liveEditCall.body.text === '线上改后', 'memoryEdit sends the text and revision')
+await store.memoryAccept('cand_live', '接受的候选')
+const liveAcceptCall = fetchCalls.filter((call) => call.path.includes('/memory') && call.body !== undefined && call.body.action === 'accept').pop()
+check(liveAcceptCall !== undefined && liveAcceptCall.body.candidateId === 'cand_live' && liveAcceptCall.body.text === '接受的候选', 'memoryAccept sends the candidate and edited text')
+check(store.memory.candidates.length === 0, 'accepting clears the pending candidate')
+await store.memoryReject('cand_live')
+const liveRejectCall = fetchCalls.filter((call) => call.path.includes('/memory') && call.body !== undefined && call.body.action === 'reject').pop()
+check(liveRejectCall !== undefined && liveRejectCall.body.candidateId === 'cand_live', 'memoryReject posts the reject action')
 
 const liveGroupResult = await store.clearGroupNote('grp_live')
 check(liveGroupResult.cleared === false, 'clearGroupNote reports when the Host ignores noteEntries')

@@ -115,6 +115,8 @@ export function defaultState(userName = defaultUserName()) {
     attachments: {},
     /** taskId -> dispatched-task record */
     tasks: [],
+    /** pending auto-memory candidates (never injected into prompts) */
+    memoryCandidates: [],
     /** batchId -> dispatch batch receipt metadata */
     taskBatches: {},
   }
@@ -250,6 +252,7 @@ export function createStore(ctx, options = {}) {
   db.helpers = Array.isArray(db.helpers) ? db.helpers : []
   db.attachments = typeof db.attachments === 'object' && db.attachments !== null && !Array.isArray(db.attachments) ? db.attachments : {}
   db.tasks = Array.isArray(db.tasks) ? db.tasks : []
+  db.memoryCandidates = Array.isArray(db.memoryCandidates) ? db.memoryCandidates : []
   db.taskBatches = typeof db.taskBatches === 'object' && db.taskBatches !== null && !Array.isArray(db.taskBatches) ? db.taskBatches : {}
   db.self = typeof db.self === 'object' && db.self !== null ? db.self : { id: 'owner', name: defaultUserName() }
   db.version = Number.isFinite(db.version) ? db.version : STATE_VERSION

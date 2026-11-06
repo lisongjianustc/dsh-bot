@@ -177,6 +177,26 @@
 
 **数字**：Host **169/169**、Client smoke **215**、真实 Host 冒烟 7/7。
 
+### 1.18 v0.5.0：工具详情 / 右侧文件浏览器 / 自动记忆
+
+**A. 对话里能看见工具在做什么**
+- Host 消息 tool parts 新增可选 `summary/args/result`（args≤2000、result≤4000、summary≤160：bash 命令首行、read/write/edit 路径、web URL/query），finalize 兜底同样保留；历史消息不回填。
+- Client ToolRow：收起态显示「工具族图标 + 工具名 + summary + 状态」；点击展开参数（JSON 美化、可复制）与结果（等宽、≤240px 滚动、可复制）；失败自动展开；旧消息无字段时只显示名称+状态。
+- 真实验收：Chief 回合的 `bash echo tool-detail-test` 行显示 summary，展开后可见 `{"command":…}` 与输出 `tool-detail-test`（截图 `docs/screenshots/tool-details.png`）。
+
+**B. 右侧文件浏览器与预览**
+- Host 新 `fs-browser.js`：`GET /api/fs/roots|list|read|raw`，根目录 = 群 workspaces / Bot workspace + 会话 cwd / 插件默认 workspace；realpath 白名单防越界、逃逸 symlink 过滤、文本 ≤512KiB（二进制 415）、raw 流式。
+- Client：右侧 420px 文件面板（rail 文件夹按钮；与设置抽屉互斥、Esc 关闭），根目录下拉 + breadcrumb、目录/文件列表（类型/大小）、文本预览带行号+复制、Markdown 复用渲染、图片 raw、二进制提示"不支持预览"+下载；聊天中的 Markdown 链接与行内路径可点击直接打开定位；403/404/415 可读错误。
+- 真实验收：在 Chief 会话打开文件面板 → `game/` → 预览 `project.godot`（行号+代码）（截图 `docs/screenshots/file-browser.png`、`file-preview.png`）。
+
+**C. 自动记忆（团队 + 每 Bot，可编辑）**
+- Host `auto-memory.js`（零额外模型调用）：回合结束从用户消息抽「记住/以后/约定/统一/默认/不要/必须/偏好…」句、从 Bot 回复抽明确结论；按 Bot 名/团队词归属 team 或该 Bot；normalize 去重；强指令（记住/以后都/约定/不要再…）自动写入（`auto:true, source:auto`），其余进入**待确认候选**（≤100，不注入 prompt，开关 `settings.autoMemory` 默认开，关闭时全部候选化）。
+- 接口：`POST /memory` 增加 `list(candidates)/edit(revision 409)/accept(可改文本)/reject`，`POST /memory/auto` 开关；已接受记忆每轮照常注入，自动条目标注「自动记录，可纠正」。
+- Client：记忆 tab 新增「自动记忆」开关、条目行内编辑、auto 徽标、待确认候选区（接受/编辑后接受/忽略）。
+- 真实验收：对 Chief 说「记住：以后所有文档先用中文写，再给英文摘要」→ 下一轮即出现 `auto:true` 团队记忆，并伴随 Bot 自己 `bot_remember` 的细化条目；候选/开关/编辑接口均通过 API 与 smoke 验证。
+
+**数字**：Host **190/190**、Client smoke **256 项**、真实 Host 冒烟 7/7。客户端子代理在最后阶段中断，smoke 中一处未定义变量已由 Lead 修复复跑通过。
+
 ## 3. 安装与验收步骤
 
 ### 3.1 全新安装

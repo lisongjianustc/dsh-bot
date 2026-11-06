@@ -109,8 +109,8 @@ Browser (client half)                      Host process (host half)
 
 ```sh
 node scripts/build-client.mjs   # src/client/*.js -> lib/client.js
-node --test test/*.test.js      # 169 host tests
-node scripts/smoke-client.mjs   # 215 client checks
+node --test test/*.test.js      # 190 host tests
+node scripts/smoke-client.mjs   # 256 client checks
 node scripts/verify-live.mjs http://127.0.0.1:<port>   # live Host smoke
 ```
 

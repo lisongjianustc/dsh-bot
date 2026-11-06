@@ -62,7 +62,17 @@ function isHiddenMessage(message) {
 
 /** Render a tool argument/result value as readable text. */
 function toolValueText(value) {
-  if (typeof value === 'string') return value
+  if (typeof value === 'string') {
+    var trimmed = value.trim()
+    if ((trimmed.charAt(0) === '{' || trimmed.charAt(0) === '[') && trimmed.length > 1) {
+      try {
+        return JSON.stringify(JSON.parse(trimmed), null, 2)
+      } catch (error) {
+        return value
+      }
+    }
+    return value
+  }
   if (value === null || value === undefined) return ''
   try {
     return JSON.stringify(value, null, 2)
@@ -71,19 +81,51 @@ function toolValueText(value) {
   }
 }
 
+/** Icon + color family for one tool name. */
+function toolKind(name) {
+  var value = String(name === undefined || name === null ? '' : name).toLowerCase()
+  if (value.indexOf('read') === 0 || value.indexOf('view') === 0 || value === 'cat' || value === 'open') return 'read'
+  if (value.indexOf('write') === 0 || value.indexOf('edit') === 0 || value.indexOf('apply') === 0 || value.indexOf('patch') === 0) return 'write'
+  if (value.indexOf('bash') === 0 || value.indexOf('exec') === 0 || value.indexOf('shell') === 0 || value.indexOf('run') === 0 || value.indexOf('terminal') === 0) return 'bash'
+  if (value.indexOf('web') === 0 || value.indexOf('fetch') === 0 || value.indexOf('browse') === 0 || value.indexOf('search') === 0) return 'web'
+  if (value.indexOf('grep') === 0 || value.indexOf('glob') === 0 || value.indexOf('find') === 0 || value.indexOf('ls') === 0) return 'search'
+  return 'other'
+}
+
+/** Glyph for one tool family. */
+function toolGlyph(kind, size) {
+  if (kind === 'read') return h(Icon, { name: 'file', size: size })
+  if (kind === 'write') return h(Icon, { name: 'edit', size: size })
+  if (kind === 'bash') return h(Icon, { name: 'menu', size: size })
+  if (kind === 'web') return h(Icon, { name: 'external', size: size })
+  if (kind === 'search') return h(Icon, { name: 'search', size: size })
+  return h(Icon, { name: 'dot', size: size })
+}
+
 /**
  * One foldable tool call row inside a bubble.
  *
- * A `running` part on a message that already settled is shown as
- * "unconfirmed" instead of spinning forever: the Host's result merge can lose
- * a `tool/result`, and a permanent spinner would be worse than an honest
- * unknown. Arguments/results are shown when the Host includes them.
+ * Collapsed it shows the tool name, the Host's one-line summary and the status
+ * badge. Expanding reveals the arguments and the result with a copy control;
+ * a failed call starts expanded so the error is never hidden. A `running` part
+ * on a settled message is shown as "unconfirmed" instead of spinning forever.
  */
 function ToolRow(props) {
-  var pair = React.useState(false)
+  var tool = props.tool === undefined || props.tool === null ? {} : props.tool
+  var messageId = props.messageId === undefined ? '' : String(props.messageId)
+  var index = props.index === undefined ? 0 : props.index
+  var memoryKey = messageId + ':' + index
+  var openMemory = props.store !== null && props.store !== undefined && props.store.toolExpanded !== undefined
+    ? props.store.toolExpanded
+    : null
+  var pair = React.useState(function () {
+    // A failed call is expanded from the first render so the error is visible
+    // even before effects run (and in server-rendered smoke checks).
+    if (tool.status === 'failed') return true
+    return openMemory !== null && openMemory[memoryKey] === true
+  })
   var expanded = pair[0]
   var setExpanded = pair[1]
-  var tool = props.tool === undefined || props.tool === null ? {} : props.tool
   var rawStatus =
     tool.status === 'failed' ? 'failed' : tool.status === 'running' ? 'running' : tool.status === 'ok' ? 'ok' : 'ok'
   var unconfirmed = rawStatus === 'running' && props.messageDone === true
@@ -101,16 +143,45 @@ function ToolRow(props) {
   var hasArgs = args !== undefined && args !== null && args !== ''
   var hasResult = result !== undefined && result !== null && result !== ''
   var hasError = status === 'failed' && typeof tool.error === 'string' && tool.error !== ''
+  var summary = typeof tool.summary === 'string' ? tool.summary : typeof tool.summary === 'number' ? String(tool.summary) : ''
+  var kind = toolKind(tool.name)
   var expandable = hasError || hasArgs || hasResult || unconfirmed
-  var className = 'db-tool is-' + status + (expandable ? ' is-clickable' : '')
-  var glyph =
-    status === 'failed'
-      ? h(Icon, { name: 'alert', size: 11 })
-      : status === 'running'
-        ? h(Spinner, null)
-        : status === 'unknown'
-          ? h(Icon, { name: 'dot', size: 11 })
-          : h(Icon, { name: 'check', size: 11 })
+  var className = 'db-tool is-' + status + ' db-tool-kind-' + kind + (expandable ? ' is-clickable' : '')
+  var pairCopied = React.useState(false)
+  var copied = pairCopied[0]
+  var setCopied = pairCopied[1]
+
+  // A failed call opens itself; the state is mirrored into the store so it
+  // survives the row remounting (e.g. after a timeline re-render).
+  React.useEffect(
+    function () {
+      if (hasError || status === 'failed') {
+        if (openMemory !== null) openMemory[memoryKey] = true
+        setExpanded(true)
+      }
+    },
+    [hasError, status, memoryKey],
+  )
+
+  function toggle() {
+    var next = !expanded
+    setExpanded(next)
+    if (openMemory !== null) openMemory[memoryKey] = next
+  }
+
+  function copyValue(value) {
+    copyText(toolValueText(value)).then(
+      function () {
+        setCopied(true)
+        setTimeout(function () {
+          setCopied(false)
+        }, 1200)
+      },
+      function () {
+        /* clipboard unavailable: the text stays selectable in the pre block */
+      },
+    )
+  }
 
   var detail = null
   if (expanded && expandable) {
@@ -121,7 +192,21 @@ function ToolRow(props) {
         h(
           'div',
           { key: 'args', className: 'db-tool-detail' },
-          h('div', { className: 'db-tool-detail-label' }, props.t('chat.tool.args')),
+          h(
+            'div',
+            { className: 'db-tool-detail-head' },
+            h('span', { className: 'db-tool-detail-label' }, props.t('chat.tool.args')),
+            h(ui.IconButton, {
+              icon: copied ? 'check' : 'copy',
+              size: 11,
+              label: props.t('chat.tool.copy'),
+              title: props.t('chat.tool.copy'),
+              onClick: function (event) {
+                if (event !== undefined && typeof event.stopPropagation === 'function') event.stopPropagation()
+                copyValue(args)
+              },
+            }),
+          ),
           h('pre', { className: 'db-tool-detail-body' }, toolValueText(args)),
         ),
       )
@@ -131,7 +216,21 @@ function ToolRow(props) {
         h(
           'div',
           { key: 'result', className: 'db-tool-detail' },
-          h('div', { className: 'db-tool-detail-label' }, props.t('chat.tool.result')),
+          h(
+            'div',
+            { className: 'db-tool-detail-head' },
+            h('span', { className: 'db-tool-detail-label' }, props.t('chat.tool.result')),
+            h(ui.IconButton, {
+              icon: copied ? 'check' : 'copy',
+              size: 11,
+              label: props.t('chat.tool.copy'),
+              title: props.t('chat.tool.copy'),
+              onClick: function (event) {
+                if (event !== undefined && typeof event.stopPropagation === 'function') event.stopPropagation()
+                copyValue(result)
+              },
+            }),
+          ),
           h('pre', { className: 'db-tool-detail-body' }, toolValueText(result)),
         ),
       )
@@ -150,19 +249,21 @@ function ToolRow(props) {
         role: expandable ? 'button' : undefined,
         tabIndex: expandable ? 0 : undefined,
         title: expandable ? props.t('chat.tool.showError') : tool.name,
-        onClick: expandable
-          ? function () {
-              setExpanded(!expanded)
-            }
-          : undefined,
+        onClick: expandable ? toggle : undefined,
         onKeyDown: expandable
           ? function (event) {
-              if (event.key === 'Enter' || event.key === ' ') setExpanded(!expanded)
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault()
+                toggle()
+              }
             }
           : undefined,
       },
-      glyph,
+      toolGlyph(kind, 11),
       h('span', { className: 'db-tool-name' }, tool.name === undefined ? 'tool' : tool.name),
+      summary === ''
+        ? null
+        : h('span', { className: 'db-tool-summary', title: summary }, summary),
       h('span', { className: 'db-tool-state' }, label),
     ),
     detail,
@@ -274,6 +375,10 @@ function MessageRow(props) {
   // A message that already settled must never show a spinning tool row: the
   // Host's result merge can miss a tool/result, and "unconfirmed" is honest.
   var messageDone = message.status !== 'streaming' && message.status !== 'pending'
+  var fileOptions =
+    store !== undefined && store !== null && typeof store.openFile === 'function'
+      ? { fileLink: function (path) { store.openFile(path) } }
+      : undefined
   var isUser = message.role === 'user'
   var isSystem = message.role === 'system'
   var isRelay = message.role === 'relay'
@@ -311,7 +416,17 @@ function MessageRow(props) {
     var current = parts[k]
     if (current === null || current === undefined) continue
     if (current.type === 'tool') {
-      nodes.push(h(ToolRow, { key: 'tool-' + k, tool: current, t: t, messageDone: messageDone }))
+      nodes.push(
+        h(ToolRow, {
+          key: 'tool-' + k,
+          t: t,
+          store: store,
+          messageId: message.id,
+          index: k,
+          tool: current,
+          messageDone: messageDone,
+        }),
+      )
     } else if (current.type === 'image' || current.type === 'file') {
       var attachmentPart = attachmentNode(current, 'attach-' + k)
       if (attachmentPart !== null) nodes.push(h('div', { key: 'attach-wrap-' + k, className: 'db-attachments' }, attachmentPart))
@@ -325,7 +440,7 @@ function MessageRow(props) {
         h(
           'div',
           { key: 'text-' + k, className: 'db-text' },
-          markdown.render(current.text, streaming && k === lastTextIndex ? 'db-cursor' : undefined),
+          markdown.render(current.text, streaming && k === lastTextIndex ? 'db-cursor' : undefined, fileOptions),
         ),
       )
     }
@@ -341,7 +456,7 @@ function MessageRow(props) {
   }
   if (nodes.length === 0 && text !== '') {
     nodes.push(
-      h('div', { key: 'text-fallback', className: 'db-text' }, markdown.render(text, streaming ? 'db-cursor' : undefined)),
+      h('div', { key: 'text-fallback', className: 'db-text' }, markdown.render(text, streaming ? 'db-cursor' : undefined, fileOptions)),
     )
   }
   if (nodes.length === 0 && streaming) {

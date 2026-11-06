@@ -16,6 +16,7 @@ var React = require('react')
 var ui = require('./ui.js')
 var chat = require('./chat.js')
 var panels = require('./panels.js')
+var files = require('./files.js')
 var transport = require('./transport.js')
 
 var h = ui.h
@@ -294,7 +295,19 @@ function RightRail(props) {
     { id: 'schedules', icon: 'clock', label: t('tab.schedules') },
     { id: 'usage', icon: 'chart', label: t('tab.usage') },
   ]
-  var children = []
+  var children = [
+    h(ui.IconButton, {
+      key: 'files',
+      icon: 'folder',
+      label: t('files.title'),
+      title: t('files.title'),
+      active: store.fileOpen === true,
+      className: 'db-rail-btn' + (store.fileOpen === true ? ' is-active' : ''),
+      onClick: function () {
+        store.toggleFile()
+      },
+    }),
+  ]
   for (var i = 0; i < tabs.length; i += 1) {
     children.push(
       h(ui.IconButton, {
@@ -520,6 +533,7 @@ function BotWorkspacePage(props) {
         },
       }),
       center,
+      store.fileOpen === true ? h(ui.ErrorBoundary, { message: t('error.panelCrashed'), retry: t('action.retry') }, h(files.FilePanel, { t: t, store: store })) : null,
       h(RightRail, { t: t, store: store }),
     ),
     h(ui.ErrorBoundary, { message: t('error.panelCrashed'), retry: t('action.retry') }, h(panels.SettingsDrawer, { t: t, store: store, pickDirectory: props.pickDirectory })),
