@@ -46,6 +46,50 @@ test('avatars: the longest keyword outranks more short hits', () => {
   assert.equal(matchAvatar({ name: '研究员', role: '文献调研' }).id, 'research-flask')
 })
 
+test('avatars: narrative, numeric and art roles land on their own presets', () => {
+  assert.equal(matchAvatar({
+    name: '剧情策划',
+    role: '世界观、主线支线与关卡叙事结构的设计者',
+  }).id, 'writer-quill')
+  assert.equal(matchAvatar({
+    name: '数值策划',
+    role: '属性、公式、成长曲线与经济平衡的设计者',
+  }).id, 'data-chart')
+  assert.equal(matchAvatar({
+    name: '像素美工',
+    role: '纯代码程序化像素美术，负责精灵与调色板',
+  }).id, 'photo-camera')
+  // A single Chinese character must never win: "主线" used to match lead-crown.
+  assert.equal(matchAvatar({ name: 'x', role: '主线剧情' }).id, 'writer-quill')
+  assert.notEqual(matchAvatar({ name: 'x', role: '主线' }).id, 'lead-crown')
+})
+
+test('avatars: the nine cross-half probes agree with the client', () => {
+  // Locked by the client smoke test; the Host must answer identically.
+  const probes = [
+    [{ name: 'Chief', role: '团队总管', isMain: true }, 'lead-crown'],
+    [{ name: 'Alice', role: '研究员' }, 'research-flask'],
+    [{ name: 'Bob', role: '工程师' }, 'engineer-wrench'],
+    [{ name: '数据猫', role: '数据分析' }, 'data-chart'],
+    [{ name: '市场增长', role: '市场运营' }, 'ops-megaphone'],
+    [{ name: '剧情策划', role: '主线剧情与支线设计' }, 'writer-quill'],
+    [{ name: '数值策划', role: '属性、公式、成长曲线与经济平衡的设计者' }, 'data-chart'],
+    [{ name: '像素美工', role: '纯代码程序化像素美术，负责精灵与调色板' }, 'photo-camera'],
+    [{ name: '未知角色', role: '随便聊聊' }, 'data-chart'],
+  ]
+  for (const [identity, expected] of probes) {
+    assert.equal(matchAvatar(identity).id, expected, identity.name)
+  }
+})
+
+test('avatars: occurrences of the longest keyword outrank one-off same-length hits', () => {
+  // 剧情 appears twice (name + role), 设计 once: both two characters, so the
+  // occurrence count of the longest keyword decides, not table order.
+  assert.equal(matchAvatar({ name: '剧情策划', role: '主线剧情与支线设计' }).id, 'writer-quill')
+  // The same rule leaves a one-off design role on the palette.
+  assert.equal(matchAvatar({ name: '设计助理', role: '视觉与交互设计' }).id, 'design-palette')
+})
+
 test('avatars: a main bot with no keyword match gets the crown', () => {
   assert.equal(matchAvatar({ name: 'Q7', role: '', isMain: true }).id, LEAD_AVATAR_ID)
   // A real match still wins over the main preference.
@@ -91,4 +135,21 @@ test('avatars: lookup helpers and old-record backfill', () => {
   assert.equal(avatarForBot({ ...old, avatar: { kind: 'library', id: 'heart-heart' } }).id, 'heart-heart')
   // A stored avatar whose preset disappeared is re-matched, never left bare.
   assert.notEqual(avatarForBot({ ...old, avatar: { kind: 'library', id: 'deleted-preset' } }).id, 'deleted-preset')
+})
+
+// A subordinate instruction that mentions "主 Bot" must not outrank its own
+// role: the lead preset keeps no Bot-name keyword for exactly this reason.
+test('a junior role mentioning the main Bot still matches its own avatar', () => {
+  const dev = matchAvatar({
+    name: '开发',
+    role: 'Godot 4 / GDScript 玩法与系统实现',
+    instructions: '你是游戏开发组的开发（Godot Engineer），负责单机游戏的技术实现。技术栈 Godot 4.x + GDScript；边界：缺设定就问主 Bot，不要自己编一套。',
+  })
+  assert.equal(dev.id, 'engineer-wrench')
+  const writer = matchAvatar({
+    name: '文案师',
+    role: '对白、旁白、任务文本与 UI 文案的写作者',
+    instructions: '你是文案师，负责文字内容；缺大纲就问主 Bot。',
+  })
+  assert.equal(writer.id, 'writer-quill')
 })

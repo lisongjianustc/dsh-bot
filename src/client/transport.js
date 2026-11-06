@@ -343,6 +343,15 @@ function connectEvents(options) {
       if (typeof handlers.onOpen === 'function') handlers.onOpen()
     }
     stream.onmessage = function (message) {
+      // Count every data frame (including the `{type:'ping'}` heartbeat) before
+      // parsing: the silence watchdog only needs to know the stream is alive.
+      if (typeof handlers.onData === 'function') {
+        try {
+          handlers.onData()
+        } catch (error) {
+          /* a listener must never break the stream */
+        }
+      }
       var frame
       try {
         frame = JSON.parse(message.data)
@@ -374,6 +383,17 @@ function connectEvents(options) {
     /** Push the last applied sequence so a reconnect can resume from it. */
     setSince: function (next) {
       since = next
+    },
+    /**
+     * Drop the current socket and reconnect immediately (silence watchdog).
+     * The regular 1s/5s backoff still governs error-driven reconnects.
+     */
+    reopen: function () {
+      if (disposed) return
+      failures = 0
+      clearTimer()
+      closeSocket()
+      open()
     },
     close: function () {
       disposed = true

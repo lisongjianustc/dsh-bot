@@ -37,6 +37,11 @@ var TOAST_MS = 2600
  */
 var STRUCTURAL_TIMEOUT_MS = 35000
 
+/** How often the silence watchdog inspects the event stream. */
+var WATCHDOG_INTERVAL_MS = 15000
+/** How long the stream may stay silent (no data frame at all) before a reconnect. */
+var STREAM_IDLE_MS = 45000
+
 /** 12 hex chars, mirroring the Host id style. */
 function rid() {
   var out = ''
@@ -531,6 +536,9 @@ function createStore() {
     toasts: [],
     since: 0,
     disposed: false,
+    stateRev: undefined,
+    refreshing: false,
+    streamReconnects: 0,
   }
 
   var listeners = []
@@ -544,6 +552,146 @@ function createStore() {
   var resyncTimer = null
   var frameSeen = false
   var started = false
+  var lastFrameAt = 0
+  var streamOpenedAt = 0
+  var watchdogTimer = null
+  var refreshInFlight = null
+  var staleRefreshTimer = null
+
+  /** Read the optional `stateRev` off a state body or its envelope. */
+  function revisionOf(state, envelope) {
+    if (envelope !== null && typeof envelope === 'object') {
+      if (typeof envelope.stateRev === 'number' && isFinite(envelope.stateRev)) return envelope.stateRev
+    }
+    if (state !== null && typeof state === 'object') {
+      if (typeof state.stateRev === 'number' && isFinite(state.stateRev)) return state.stateRev
+    }
+    return undefined
+  }
+
+  /**
+   * Refresh the whole snapshot through `GET /state`.
+   *
+   * Used by the visibility/focus recovery handlers and the manual refresh
+   * button. It never flips the connection banner on failure: the caller decides
+   * how loud to be, and the next successful read or stream frame repairs state.
+   */
+  function refreshState() {
+    if (disposed) return Promise.reject(new Error('disposed'))
+    if (refreshInFlight !== null) return refreshInFlight
+    store.refreshing = true
+    notify()
+    refreshInFlight = transport.get('state').then(
+      function (body) {
+        refreshInFlight = null
+        if (disposed) {
+          store.refreshing = false
+          return false
+        }
+        store.refreshing = false
+        var applied = applyState(body.state, revisionOf(body.state, body), 'get')
+        if (applied) store.error = null
+        notify()
+        return applied
+      },
+      function (error) {
+        refreshInFlight = null
+        if (!disposed) {
+          store.refreshing = false
+          notify()
+        }
+        throw error
+      },
+    )
+    return refreshInFlight
+  }
+
+  /** Ask for a fresh snapshot after an out-of-order SSE state frame. */
+  function scheduleStaleRefresh() {
+    if (disposed || staleRefreshTimer !== null) return
+    staleRefreshTimer = setTimeout(function () {
+      staleRefreshTimer = null
+      refreshState().catch(function () {
+        /* silent: the stream resync or the next read repairs the snapshot */
+      })
+    }, 1000)
+  }
+
+  /** Whether the event stream has been silent long enough to force a reconnect. */
+  function checkStreamHealth(nowOverride) {
+    if (disposed) return false
+    if (store.mode === 'mock') return false
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return false
+    if (stream === null || typeof stream.reopen !== 'function') return false
+    var now = typeof nowOverride === 'number' ? nowOverride : Date.now()
+    var last = lastFrameAt === 0 ? streamOpenedAt : lastFrameAt
+    if (last === 0) return false
+    if (now - last <= STREAM_IDLE_MS) return false
+    try {
+      stream.reopen()
+    } catch (error) {
+      return false
+    }
+    lastFrameAt = now
+    store.streamReconnects = numberOr(store.streamReconnects, 0) + 1
+    return true
+  }
+
+  /** Snapshot of the stream liveness, for the watchdog and for tests. */
+  function streamHealth(nowOverride) {
+    var now = typeof nowOverride === 'number' ? nowOverride : Date.now()
+    var last = lastFrameAt === 0 ? streamOpenedAt : lastFrameAt
+    var idle = last === 0 ? Infinity : Math.max(0, now - last)
+    return {
+      lastFrameAt: lastFrameAt,
+      openedAt: streamOpenedAt,
+      idleMs: idle,
+      stale: last !== 0 && idle > STREAM_IDLE_MS,
+      reconnects: numberOr(store.streamReconnects, 0),
+    }
+  }
+
+  /** visibilitychange / window.focus recovery: pull the snapshot again. */
+  function onPageVisible() {
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
+    refreshState().catch(function () {
+      /* silent: the next read or stream frame repairs state */
+    })
+  }
+
+  function onWindowFocus() {
+    onPageVisible()
+  }
+
+  function startHealthMonitors() {
+    if (watchdogTimer !== null) return
+    watchdogTimer = setInterval(function () {
+      checkStreamHealth()
+    }, WATCHDOG_INTERVAL_MS)
+    if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+      document.addEventListener('visibilitychange', onPageVisible)
+    }
+    if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+      window.addEventListener('focus', onWindowFocus)
+    }
+  }
+
+  function stopHealthMonitors() {
+    if (watchdogTimer !== null) {
+      clearInterval(watchdogTimer)
+      watchdogTimer = null
+    }
+    if (staleRefreshTimer !== null) {
+      clearTimeout(staleRefreshTimer)
+      staleRefreshTimer = null
+    }
+    if (typeof document !== 'undefined' && typeof document.removeEventListener === 'function') {
+      document.removeEventListener('visibilitychange', onPageVisible)
+    }
+    if (typeof window !== 'undefined' && typeof window.removeEventListener === 'function') {
+      window.removeEventListener('focus', onWindowFocus)
+    }
+  }
 
   function clearResyncTimer() {
     if (resyncTimer !== null) {
@@ -755,7 +903,16 @@ function createStore() {
     store.schedules = { list: [], loading: false, error: null, loaded: false, unsupported: false }
   }
 
-  function applyState(next) {
+  function applyState(next, revision, source) {
+    // Skip an out-of-order snapshot: a stream frame or a racing read that is
+    // older than what is already on screen must not move the page backwards.
+    if (typeof revision === 'number' && isFinite(revision)) {
+      if (typeof store.stateRev === 'number' && revision < store.stateRev) {
+        if (source === 'sse') scheduleStaleRefresh()
+        return false
+      }
+      store.stateRev = revision
+    }
     var wasMock = store.mode === 'mock'
     if (wasMock) {
       clearMockTimers()
@@ -768,6 +925,7 @@ function createStore() {
     ensureSelection()
     refreshSelectedIfStale()
     notify()
+    return true
   }
 
   function syncSchedulesFromState() {
@@ -810,7 +968,7 @@ function createStore() {
     return transport.get('state').then(
       function (body) {
         if (disposed) return
-        applyState(body.state)
+        applyState(body.state, revisionOf(body.state, body), 'get')
       },
       function (error) {
         if (disposed) return
@@ -1062,11 +1220,14 @@ function createStore() {
   }
 
   function handleFrame(frame) {
+    // Any data frame proves the stream is alive, including the heartbeat.
+    lastFrameAt = Date.now()
+    if (frame.type === 'ping') return
     store.since += 1
     if (stream !== null && typeof stream.setSince === 'function') stream.setSince(store.since)
     switch (frame.type) {
       case 'state':
-        applyState(frame.state)
+        applyState(frame.state, revisionOf(frame.state, frame), 'sse')
         return
       case 'chat':
         applyChat(frame.chat)
@@ -1108,6 +1269,10 @@ function createStore() {
       if (disposed) return
       stream = transport.connectEvents({
         since: store.since,
+        onData: function () {
+          // Every data frame, heartbeat included, proves the stream is alive.
+          lastFrameAt = Date.now()
+        },
         onFrame: function (frame) {
           frameSeen = true
           handleFrame(frame)
@@ -1116,6 +1281,8 @@ function createStore() {
           // The Host writes one full state frame when it accepts a stream, so a
           // connect is already a resynchronization point. Ask again only when
           // that frame never arrives (an older Host without the initial frame).
+          streamOpenedAt = Date.now()
+          lastFrameAt = streamOpenedAt
           frameSeen = false
           clearResyncTimer()
           resyncTimer = setTimeout(function () {
@@ -1131,6 +1298,7 @@ function createStore() {
           }
         },
       })
+      startHealthMonitors()
     })
   }
 
@@ -1147,6 +1315,7 @@ function createStore() {
       stream = null
     }
     clearResyncTimer()
+    stopHealthMonitors()
     clearMockTimers()
     for (var i = 0; i < toastTimers.length; i += 1) clearTimeout(toastTimers[i])
     toastTimers = []
@@ -2237,6 +2406,9 @@ function createStore() {
   store.dispose = dispose
   store.retry = retry
   store.loadState = loadState
+  store.refreshState = refreshState
+  store.checkStreamHealth = checkStreamHealth
+  store.streamHealth = streamHealth
 
   store.bots = bots
   store.groups = groups

@@ -10,7 +10,7 @@
  */
 import { mkdirSync } from 'node:fs'
 import { createAttachments } from './attachments.js'
-import { avatarForBot, isAvatarId, normalizeAvatar } from './avatars.js'
+import { avatarForBot, isAvatarId, matchAvatar, normalizeAvatar } from './avatars.js'
 import { BotError, describeError } from './errors.js'
 import {
   ENTRY_MAX,
@@ -1240,6 +1240,10 @@ export function createServices({ ctx, config = {}, store }) {
 
   // ------------------------------------------------------------- state view
   const stateView = async () => ({
+    // Monotonic ledger revision: the page compares it with the last one it saw
+    // to decide whether a full reload is needed. Every store.save() bumps it.
+    stateRev: Number(db.rev) || 0,
+    updatedAt: Number(db.updatedAt) || 0,
     self: { id: String(db.self.id ?? 'owner'), name: String(db.settings.userName ?? db.self.name ?? 'owner') },
     bots: db.bots.map(bot => compact({
       id: bot.id,
@@ -1309,12 +1313,36 @@ export function createServices({ ctx, config = {}, store }) {
     void store.save().catch(error => log('warn', 'the pin migration could not be persisted', error))
   }
 
-  /** Give every stored Bot a renderable avatar; old records had none. */
+  /**
+   * Bring every AUTO avatar up to date with the current matching table.
+   *
+   * Two jobs in one pass: an old Bot with no avatar gets one, and a Bot whose
+   * avatar was auto-matched keeps following the rules — so a matching-rule fix
+   * reaches already-created Bots on the next load instead of needing them to be
+   * recreated. A Bot the user pinned explicitly (`avatarAuto === false`) is
+   * never touched. Nothing is written when nothing changed.
+   */
   const backfillAvatars = async () => {
     let changed = false
     for (const bot of db.bots) {
-      if (bot.avatar !== undefined && bot.avatar !== null && isAvatarId(bot.avatar.id)) continue
-      bot.avatar = avatarForBot(bot)
+      if (bot.avatarAuto === false) continue
+      const next = matchAvatar({
+        name: bot.name,
+        role: bot.role,
+        instructions: bot.instructions,
+        isMain: bot.isMain === true,
+      })
+      const current = bot.avatar
+      if (current !== undefined && current !== null
+        && current.id === next.id && current.motif === next.motif
+        && current.color === next.color && current.background === next.background) {
+        if (bot.avatarAuto === undefined) {
+          bot.avatarAuto = true
+          changed = true
+        }
+        continue
+      }
+      bot.avatar = next
       if (bot.avatarAuto === undefined) bot.avatarAuto = true
       changed = true
     }

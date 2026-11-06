@@ -2,8 +2,9 @@
  * The single real-time channel from the Host half to the workbench page.
  *
  * One hub server-side; every `/dsh-bot/api/events` response is attached here.
- * Frames are `data: <json>\n\n`; a `: ping` comment every 20 seconds keeps
- * proxies and browsers from closing an idle stream. A client that fails to take
+ * Frames are `data: <json>\n\n`. Every 20 seconds an idle stream receives a
+ * visible `{"type":"ping","at":<ms>}` frame (not a comment), so the page can
+ * refresh its last-frame timestamp and detect a stale connection. A client that fails to take
  * a frame is detached rather than retried, because a half-broken response must
  * never stall the Bot runtime.
  *
@@ -23,9 +24,11 @@ const SSE_HEADERS = {
 
 /**
  * Create the broadcaster.
+ * @param {{ heartbeatMs?: number }} [options] - heartbeat cadence (tests use a short one).
  * @returns {object} the hub.
  */
-export function createHub() {
+export function createHub(options = {}) {
+  const heartbeatMs = Number(options.heartbeatMs) > 0 ? Number(options.heartbeatMs) : HEARTBEAT_MS
   /** @type {Set<import('node:http').ServerResponse>} */
   const clients = new Set()
   let heartbeat
@@ -36,14 +39,17 @@ export function createHub() {
   const ensureHeartbeat = () => {
     if (heartbeat !== undefined || disposed) return
     heartbeat = setInterval(() => {
+      // A visible data frame, not a comment: the page refreshes its
+      // last-frame timestamp on it, so a silent stream becomes detectable.
+      const body = frame({ type: 'ping', at: Date.now() })
       for (const res of clients) {
         try {
-          res.write(': ping\n\n')
+          res.write(body)
         } catch {
           detach(res)
         }
       }
-    }, HEARTBEAT_MS)
+    }, heartbeatMs)
     // An idle keep-alive must never hold the process open.
     if (typeof heartbeat.unref === 'function') heartbeat.unref()
   }
@@ -82,7 +88,18 @@ export function createHub() {
         return () => {}
       }
       res.writeHead(200, SSE_HEADERS)
-      if (initial !== undefined) res.write(frame(initial))
+      if (initial !== undefined) {
+        try {
+          res.write(frame(initial))
+        } catch {
+          try {
+            res.end()
+          } catch {
+            /* the client is already gone */
+          }
+          return () => {}
+        }
+      }
       clients.add(res)
       ensureHeartbeat()
       const close = () => detach(res)

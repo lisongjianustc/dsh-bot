@@ -69,6 +69,7 @@ function makeDocument() {
       node.parentNode = null
     },
   }
+  const listeners = new Map()
   return {
     head,
     documentElement: head,
@@ -84,20 +85,68 @@ function makeDocument() {
         },
       }
     },
-    addEventListener() {},
-    removeEventListener() {},
+    addEventListener(type, listener) {
+      if (!listeners.has(type)) listeners.set(type, [])
+      listeners.get(type).push(listener)
+    },
+    removeEventListener(type, listener) {
+      const list = listeners.get(type)
+      if (list === undefined) return
+      const index = list.indexOf(listener)
+      if (index >= 0) list.splice(index, 1)
+    },
+    dispatch(type) {
+      const list = listeners.get(type)
+      if (list === undefined) return
+      for (const listener of list.slice()) {
+        try {
+          listener()
+        } catch (error) {
+          /* listeners must not break the test driver */
+        }
+      }
+    },
   }
 }
 
 globalThis.document = makeDocument()
-globalThis.window = { __ModuleLoader__: { load: null } }
+function makeWindow() {
+  const listeners = new Map()
+  return {
+    __ModuleLoader__: { load: null },
+    addEventListener(type, listener) {
+      if (!listeners.has(type)) listeners.set(type, [])
+      listeners.get(type).push(listener)
+    },
+    removeEventListener(type, listener) {
+      const list = listeners.get(type)
+      if (list === undefined) return
+      const index = list.indexOf(listener)
+      if (index >= 0) list.splice(index, 1)
+    },
+    dispatch(type) {
+      const list = listeners.get(type)
+      if (list === undefined) return
+      for (const listener of list.slice()) {
+        try {
+          listener()
+        } catch (error) {
+          /* listeners must not break the test driver */
+        }
+      }
+    },
+  }
+}
+globalThis.window = makeWindow()
 globalThis.EventSource = class StubEventSource {
+  static instances = []
   constructor(url) {
     this.url = url
     this.onopen = null
     this.onmessage = null
     this.onerror = null
     this.closed = false
+    StubEventSource.instances.push(this)
   }
   close() {
     this.closed = true
@@ -124,6 +173,32 @@ const plugin = loaded.factory((request) => {
 })
 check(typeof plugin.apply === 'function', 'entry exports apply()')
 check(Array.isArray(plugin.inject), 'entry exports inject[]')
+
+/* ---------------------------------------------------------------- avatars */
+
+// The Bot form previews auto-matched avatars locally, so the renderer and the
+// keyword table are asserted against the same rules as the Host.
+const avatarModule = { exports: {} }
+const avatarSource = readFileSync(join(root, 'src', 'client', 'avatar.js'), 'utf8')
+// eslint-disable-next-line no-new-func
+new Function('module', 'exports', 'require', avatarSource)(
+  avatarModule,
+  avatarModule.exports,
+  (request) => {
+    if (request === 'react') return React
+    throw new Error('avatar module requested an unseeded module: ' + request)
+  },
+)
+const avatarLib = avatarModule.exports
+check(avatarLib.PRESETS.length === 25, 'avatar library carries the 24 presets plus the fallback')
+check(avatarLib.sha1('abc') === 'a9993e364706816aba3e25717850c26c9cd0d89d', 'avatar SHA-1 matches the Host hash')
+check(avatarLib.matchAvatar({ name: '剧情策划', role: '主线剧情与支线设计' }).id === 'writer-quill', '剧情策划 matches the writer avatar')
+check(avatarLib.matchAvatar({ name: '数值策划', role: '数值与平衡' }).id === 'data-chart', '数值策划 matches the data avatar')
+check(avatarLib.matchAvatar({ name: '像素美工', role: '像素美术' }).id === 'photo-camera', '像素美工 matches the camera avatar')
+check(avatarLib.matchAvatar({ name: '主线', role: '主线任务' }).id !== 'lead-crown', '“主线” no longer matches the lead avatar')
+check(avatarLib.matchAvatar({ name: 'Chief', role: '团队总管' }).id === 'lead-crown', 'the main Bot still matches the lead avatar')
+const fallbackAvatar = avatarLib.renderAvatar({ kind: 'library', id: 'custom', motif: 'mystery', color: '#123456', background: '#ffffff' }, 32)
+check(React.isValidElement(fallbackAvatar), 'an unknown motif still renders an SVG element')
 
 /* ------------------------------------------------------------- stub cordis */
 
@@ -222,6 +297,7 @@ check(html.includes('db-banner'), 'workspace shows the not-connected banner in d
 check(html.includes('Chief'), 'workspace lists the demo bots')
 check(html.includes('db-chat-head'), 'workspace renders the selected chat header')
 check(html.includes('db-composer'), 'workspace renders the composer')
+check(html.includes('aria-label="刷新"'), 'the page header renders the manual refresh button')
 check(!html.includes('[PASS]'), 'pass messages are hidden from the timeline')
 
 // Pinning: Chief is pinned in the demo snapshot, so it leads the list and
@@ -709,6 +785,53 @@ await sleep(150)
 check(store.mode === 'live', 'a successful state read switches the workspace to live data')
 check(store.bots().length === 2 && store.bots()[0].id === 'bot_aaaaaaaaaaaa', 'live snapshot replaces the demo roster')
 check(store.selectedChatId === 'chat_111111111111', 'live snapshot selects the pinned chat')
+
+// Silent-stream watchdog, manual refresh and revision ordering.
+check(typeof store.refreshState === 'function' && typeof store.checkStreamHealth === 'function', 'the store exposes the refresh and health controls')
+const liveStream = globalThis.EventSource.instances[globalThis.EventSource.instances.length - 1]
+check(liveStream !== undefined, 'the store opened an event stream')
+if (liveStream !== undefined && typeof liveStream.onopen === 'function') liveStream.onopen()
+check(store.streamHealth().stale === false, 'an accepted stream counts as fresh')
+const sinceBeforePing = store.since
+if (liveStream !== undefined && typeof liveStream.onmessage === 'function') {
+  liveStream.onmessage({ data: JSON.stringify({ type: 'ping' }) })
+}
+const afterPing = store.streamHealth()
+check(afterPing.stale === false && afterPing.idleMs < 1000, 'the ping heartbeat refreshes the last-frame clock')
+check(store.since === sinceBeforePing, 'ping heartbeats do not advance the event sequence')
+check(store.streamHealth(Date.now() + 60000).stale === true, 'a silent stream reads as stale after 45s')
+const instancesBeforeReopen = globalThis.EventSource.instances.length
+const reopened = store.checkStreamHealth(Date.now() + 60000)
+check(reopened === true && globalThis.EventSource.instances.length === instancesBeforeReopen + 1, 'the watchdog reopens a silent stream')
+
+liveState.settings.userName = '刷新后'
+const stateReadsBefore = fetchCalls.filter((call) => call.path.includes('/state')).length
+await store.refreshState()
+check(store.data.settings.userName === '刷新后', 'refreshState merges the Host snapshot')
+check(fetchCalls.filter((call) => call.path.includes('/state')).length === stateReadsBefore + 1, 'refreshState performs one GET /state')
+
+liveState.stateRev = 12
+await store.refreshState()
+check(store.stateRev === 12, 'stateRev is recorded from the snapshot')
+liveState.stateRev = 11
+liveState.settings.userName = '旧快照'
+await store.refreshState()
+check(store.data.settings.userName === '刷新后', 'an older stateRev never overwrites the newer state')
+
+liveState.stateRev = 13
+liveState.settings.userName = '可见性刷新'
+document.visibilityState = 'visible'
+document.dispatch('visibilitychange')
+await sleep(130)
+check(store.data.settings.userName === '可见性刷新', 'returning to a visible page refreshes the snapshot')
+liveState.stateRev = 14
+liveState.settings.userName = '焦点刷新'
+window.dispatch('focus')
+await sleep(130)
+check(store.data.settings.userName === '焦点刷新', 'window focus refreshes the snapshot')
+liveState.settings.userName = '林'
+await store.refreshState()
+check(store.data.settings.userName === '林', 'the snapshot can be restored after the refresh checks')
 
 store.selectChat('chat_111111111111')
 await sleep(120)

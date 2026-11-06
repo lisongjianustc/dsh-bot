@@ -126,6 +126,21 @@
 - **Client**：列表「置顶」分组（跨私聊/群聊统一置顶区，图钉 + 品牌色竖条 + 浅底）；聊天头部图钉按钮（置顶/取消，乐观更新+失败回滚+toast）；SSE `chat` 帧同步。
 - **验收**：真实 Host 迁移后 Chief `pinned=true`；API pin/unpin Alice 正常；GUI 截图 `docs/screenshots/pinned-chats.png`（置顶区 Chief + 图钉，头部「置顶」标记）。测试 147/147、smoke 151、`verify-live` 7/7。
 
+### 1.14 v0.3.2：页面实时自愈 + 头像匹配口径统一
+
+**用户反馈**：Chief 成功创建 6 Bot + 游戏开发组（Host 已正确落盘），但已打开的 Bot 页面不显示，刷新后才出现。
+
+**根因与修复**：
+- Host：SSE 心跳从不可见的注释 `: ping` 改为可见数据帧 `{"type":"ping","at":…}`（20s）；`StateView` 增加单调 `stateRev`/`updatedAt`；`GET /api/state` 返回 `{ok,stateRev,state}`。
+- Client：静默看门狗（>45s 无任何 data 帧则强制重连，重连首帧即全量 state）；`visibilitychange→visible` 与 `window.focus` 自动 `refreshState()`；左侧新增手动「刷新」按钮；`stateRev` 防乱序（旧 revision 丢弃并 1s 后重拉）。
+- 验收：页面保持打开时通过 API 新建 Bot，**6 秒内自动出现在列表中**（截图实测），无需刷新。
+
+**头像匹配修复（两端一致）**：
+- Host 与 Client 的评分统一为「中文关键词长度 → 该长度出现次数 → 中文总命中 → 英文命中 → 表序」；中文与英文长度不可直接比较（`narrative` 9 个字符会压过 `开发`），英文仅在平局时参与。
+- 去掉 lead 的 `主bot/主 bot` 关键词（下属说明里"问主 Bot"会误命中主 Bot 头像）。
+- **存量自动头像重算**：挂载时对所有 `avatarAuto !== false` 的 Bot 重匹配并落盘。实测用户已建的「剧情策划→writer-quill、数值策划→data-chart、开发→engineer-wrench、像素美工→photo-camera」全部纠正；显式指定头像不变。
+- 数字：Host **158/158**、smoke **174 项**、真实 Host 页面自更新验收通过。
+
 ## 3. 安装与验收步骤
 
 ### 3.1 全新安装

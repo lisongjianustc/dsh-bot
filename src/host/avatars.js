@@ -27,20 +27,20 @@ import { sha1 } from './util.js'
  * @type {{ id: string, motif: string, color: string, background: string, intent: string, zh: string[], en: string[] }[]}
  */
 export const AVATAR_PRESETS = [
-  { id: 'lead-crown', motif: 'crown', color: '#3b6df6', background: '#eaf0ff', intent: '总管/主 Bot', zh: ['总管', '主', '团队', '负责', '管理'], en: ['lead', 'chief', 'main', 'manager', 'head'] },
+  { id: 'lead-crown', motif: 'crown', color: '#3b6df6', background: '#eaf0ff', intent: '总管/主 Bot', zh: ['总管', '团队', '负责', '管理'], en: ['lead', 'chief', 'main', 'manager', 'head'] },
   { id: 'research-flask', motif: 'flask', color: '#12b3a6', background: '#e3f7f4', intent: '研究/调研', zh: ['研究', '调研', '学术', '文献', '实验'], en: ['research', 'study', 'academic'] },
   { id: 'engineer-wrench', motif: 'wrench', color: '#f08a24', background: '#fdf0e2', intent: '工程/开发', zh: ['工程', '开发', '代码', '技术'], en: ['engineer', 'developer', 'coding', 'dev', 'backend', 'frontend'] },
-  { id: 'design-palette', motif: 'palette', color: '#e05a9b', background: '#fbe9f2', intent: '设计/视觉', zh: ['设计', '视觉', '交互'], en: ['design', 'visual', 'ux', 'ui'] },
-  { id: 'writer-quill', motif: 'quill', color: '#7b5cf0', background: '#efeaff', intent: '写作/文案', zh: ['写作', '文案', '编辑', '稿'], en: ['writer', 'copywriter', 'editor', 'content'] },
+  { id: 'design-palette', motif: 'palette', color: '#e05a9b', background: '#fbe9f2', intent: '设计/视觉', zh: ['ui设计', 'ux设计', '设计', '视觉', '交互'], en: ['design', 'visual', 'ux', 'ui'] },
+  { id: 'writer-quill', motif: 'quill', color: '#7b5cf0', background: '#efeaff', intent: '写作/文案', zh: ['剧情', '叙事', '故事', '剧本', '对白', '旁白', '写作', '文案', '编辑'], en: ['writer', 'copywriter', 'editor', 'content', 'narrative', 'story'] },
   { id: 'review-magnifier', motif: 'magnifier', color: '#e34b4b', background: '#fdeaea', intent: '审查/质检/测试', zh: ['审查', '质检', '评审', '测试'], en: ['review', 'qa', 'audit', 'test', 'check'] },
   { id: 'ops-megaphone', motif: 'megaphone', color: '#8bc34a', background: '#f0f7e8', intent: '运营/增长/市场', zh: ['运营', '增长', '市场', '推广'], en: ['operations', 'growth', 'marketing', 'ops'] },
-  { id: 'data-chart', motif: 'chart', color: '#4361ee', background: '#e8ecff', intent: '数据/指标', zh: ['数据分析', '数据报表', '数据指标', '数据', '指标', '统计', '报表'], en: ['data', 'analytics', 'metric', 'report'] },
+  { id: 'data-chart', motif: 'chart', color: '#4361ee', background: '#e8ecff', intent: '数据/指标', zh: ['数据分析', '数据报表', '数据指标', '成长曲线', '数值', '公式', '平衡', '经济', '概率', '数据', '指标', '统计', '报表'], en: ['data', 'analytics', 'metric', 'report', 'numbers', 'balance'] },
   { id: 'legal-scale', motif: 'scale', color: '#5c6b8a', background: '#eceff4', intent: '法务/合规', zh: ['法务', '合规', '合同', '隐私'], en: ['legal', 'compliance', 'contract', 'privacy'] },
   { id: 'support-headset', motif: 'headset', color: '#ff8a65', background: '#ffeee8', intent: '客服/支持', zh: ['客服', '支持', '答疑'], en: ['support', 'helpdesk', 'customer', 'service'] },
-  { id: 'finance-coin', motif: 'coin', color: '#d9a521', background: '#fbf3dd', intent: '财务/成本', zh: ['财务', '成本', '预算', '账'], en: ['finance', 'budget', 'cost', 'accounting'] },
+  { id: 'finance-coin', motif: 'coin', color: '#d9a521', background: '#fbf3dd', intent: '财务/成本', zh: ['财务', '成本', '预算'], en: ['finance', 'budget', 'cost', 'accounting'] },
   { id: 'schedule-clock', motif: 'clock', color: '#4aa3df', background: '#e6f4fb', intent: '调度/协调/计划', zh: ['调度', '协调', '计划', '排期'], en: ['schedule', 'planner', 'coordinator', 'pm'] },
   { id: 'product-compass', motif: 'compass', color: '#6c63d8', background: '#eeecfb', intent: '产品/需求', zh: ['产品', '需求', '路线图'], en: ['product', 'roadmap', 'requirements'] },
-  { id: 'photo-camera', motif: 'camera', color: '#2f9e8f', background: '#e6f6f3', intent: '摄影/图像', zh: ['摄影', '图像', '拍摄'], en: ['photo', 'image', 'camera', 'picture'] },
+  { id: 'photo-camera', motif: 'camera', color: '#2f9e8f', background: '#e6f6f3', intent: '摄影/图像', zh: ['像素', '美术', '精灵', '调色板', '摄影', '图像', '拍摄'], en: ['photo', 'image', 'camera', 'picture', 'pixel', 'art', 'sprite'] },
   { id: 'music-note', motif: 'note', color: '#c94f7c', background: '#fae9ef', intent: '音乐/音频', zh: ['音乐', '音频', '配音'], en: ['music', 'audio', 'sound', 'voice'] },
   { id: 'security-shield', motif: 'shield', color: '#475569', background: '#e8edf2', intent: '安全/风控', zh: ['安全', '风控', '审计', '防护'], en: ['security', 'risk', 'guard', 'protection'] },
   { id: 'i18n-globe', motif: 'globe', color: '#0ea5e9', background: '#e5f6fe', intent: '翻译/本地化', zh: ['翻译', '本地化', '多语言'], en: ['translate', 'i18n', 'localization', 'language'] },
@@ -95,32 +95,69 @@ function escapeWord(word) {
   return word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
+/** How many times one literal occurs in a text (non-overlapping). */
+function countOccurrences(text, needle) {
+  if (needle === '') return 0
+  let count = 0
+  let index = text.indexOf(needle)
+  while (index >= 0) {
+    count += 1
+    index = text.indexOf(needle, index + needle.length)
+  }
+  return count
+}
+
 /**
  * Score one preset against the lowercased identity text.
  *
- * A longer hit outranks more short hits: `数据分析` (4 chars) beats a single
- * `数据` (2) plus a single `分析` (2) elsewhere, which is what makes a
- * "数据猫 · 数据分析" Bot a data Bot rather than a research Bot. Count breaks the
- * remaining ties, and table order breaks those.
+ * The exact rule both halves use:
+ * 1. the LONGEST matched keyword's length;
+ * 2. how many times the keyword(s) of that longest length occur;
+ * 3. the total occurrences of every matched keyword;
+ * 4. table order.
+ *
+ * So a compound term (`数据分析`, 4) beats two unrelated short terms, and a
+ * term a Bot repeats (`剧情` twice in "剧情策划 / 主线剧情与支线设计") beats two
+ * one-off terms of the same length. One-character Chinese keywords never
+ * match, because they match far too much ("主" inside "主线").
  * @param {object} preset - the table row.
  * @param {string} text - lowercased name + role + instructions.
- * @returns {{ longest: number, hits: number }} the longest hit and the hit count.
+ * @returns {{ longest: number, longestHits: number, totalHits: number }} the score.
  */
 function scorePreset(preset, text) {
-  if (text === '') return { longest: 0, hits: 0 }
-  let longest = 0
-  let hits = 0
-  const hit = (keyword) => {
-    hits += 1
-    if (keyword.length > longest) longest = keyword.length
+  if (text === '') return { zhLongest: 0, zhLongestHits: 0, zhTotal: 0, enTotal: 0 }
+  // Chinese and English lengths are not comparable ("narrative" is 9 UTF-16
+  // units while a meaningful Chinese keyword is two characters). Specificity
+  // therefore comes from the Chinese keyword length alone; an English word is
+  // always one unit and only breaks ties after the Chinese signals.
+  let zhLongest = 0
+  let zhLongestHits = 0
+  let zhTotal = 0
+  let enTotal = 0
+  for (const keyword of preset.zh) {
+    if (keyword.length < 2) continue
+    const occurrences = countOccurrences(text, keyword.toLowerCase())
+    if (occurrences <= 0) continue
+    zhTotal += occurrences
+    if (keyword.length > zhLongest) {
+      zhLongest = keyword.length
+      zhLongestHits = occurrences
+    } else if (keyword.length === zhLongest) {
+      zhLongestHits += occurrences
+    }
   }
-  for (const keyword of preset.zh) if (text.includes(keyword.toLowerCase())) hit(keyword)
   for (const keyword of preset.en) {
     const lowered = keyword.toLowerCase()
-    const pattern = new RegExp(`(?<![\\p{L}\\p{N}_])${escapeWord(lowered)}(?![\\p{L}\\p{N}_])`, 'u')
-    if (pattern.test(text)) hit(lowered)
+    let occurrences = 0
+    try {
+      const pattern = new RegExp(`(?<![\\p{L}\\p{N}_])${escapeWord(lowered)}(?![\\p{L}\\p{N}_])`, 'gu')
+      occurrences = (text.match(pattern) ?? []).length
+    } catch {
+      occurrences = countOccurrences(text, lowered)
+    }
+    enTotal += occurrences
   }
-  return { longest, hits }
+  return { zhLongest, zhLongestHits, zhTotal, enTotal }
 }
 
 /**
@@ -131,18 +168,26 @@ function scorePreset(preset, text) {
 export function matchAvatar({ name = '', role = '', instructions = '', isMain = false } = {}) {
   const text = `${name}\n${role}\n${instructions}`.toLowerCase()
   let best = undefined
-  let bestLongest = 0
-  let bestHits = 0
+  let bestZhLongest = 0
+  let bestZhLongestHits = 0
+  let bestZhTotal = 0
+  let bestEnTotal = 0
   for (const preset of AVATAR_PRESETS) {
-    const { longest, hits } = scorePreset(preset, text)
-    // Longest keyword first, then the number of hits, then table order.
-    if (longest > bestLongest || (longest === bestLongest && hits > bestHits)) {
+    const score = scorePreset(preset, text)
+    const better = score.zhLongest > bestZhLongest
+      || (score.zhLongest === bestZhLongest && score.zhLongest === 0 && score.enTotal > bestEnTotal)
+      || (score.zhLongest === bestZhLongest && score.zhLongest > 0 && score.zhLongestHits > bestZhLongestHits)
+      || (score.zhLongest === bestZhLongest && score.zhLongest > 0 && score.zhLongestHits === bestZhLongestHits && score.zhTotal > bestZhTotal)
+      || (score.zhLongest === bestZhLongest && score.zhLongestHits === bestZhLongestHits && score.zhTotal === bestZhTotal && score.enTotal > bestEnTotal)
+    if (better) {
       best = preset
-      bestLongest = longest
-      bestHits = hits
+      bestZhLongest = score.zhLongest
+      bestZhLongestHits = score.zhLongestHits
+      bestZhTotal = score.zhTotal
+      bestEnTotal = score.enTotal
     }
   }
-  if (best !== undefined && bestLongest > 0) return specOf(best)
+  if (best !== undefined && (bestZhLongest > 0 || bestEnTotal > 0)) return specOf(best)
   if (isMain === true) {
     const lead = PRESET_BY_ID.get(LEAD_AVATAR_ID)
     if (lead !== undefined) return specOf(lead)

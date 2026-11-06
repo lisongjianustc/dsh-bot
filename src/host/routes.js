@@ -544,7 +544,11 @@ export function registerRoutes({ ctx, store, services, runtime, hub, prompt, dis
           return
         }
         if (path === '/state') {
-          writeJson(res, 200, { ok: true, state: await services.fullStateView() })
+          const state = await services.fullStateView()
+          // The revision is answered twice on purpose: `stateRev` lets a poller
+          // compare cheaply, and `state.stateRev` keeps the SSE frame and this
+          // response the same shape.
+          writeJson(res, 200, { ok: true, stateRev: state.stateRev, state })
           return
         }
         if (path === '/messages') {

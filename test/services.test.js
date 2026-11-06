@@ -3,9 +3,23 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
+import { avatarById } from '../src/host/avatars.js'
 import { BotError } from '../src/host/errors.js'
 import { createServices } from '../src/host/services.js'
 import { createStore } from '../src/host/store.js'
+
+async function waitUntil(predicate, timeoutMs = 1000) {
+  const started = Date.now()
+  while (Date.now() - started < timeoutMs) {
+    if (await predicate()) return true
+    await new Promise(resolve => setTimeout(resolve, 5))
+  }
+  return false
+}
+
+function servicesAvatarId(services, botId) {
+  return services.bots.get(botId)?.avatar?.id
+}
 
 function make(t, registry) {
   const dir = mkdtempSync(join(tmpdir(), 'dsh-bot-services-'))
@@ -283,6 +297,50 @@ test('services: every bot gets a renderable avatar, and an explicit one wins', a
   const rematched = await services.bots.update(explicit.id, { avatar: null })
   assert.equal(rematched.avatar.id, 'legal-scale')
   await assert.rejects(() => services.bots.update(alice.id, { avatar: 'no-such-avatar' }), (error) => error.code === 'invalid-request')
+})
+
+test('services: the state view carries a monotonic stateRev', async (t) => {
+  const { services } = make(t)
+  const first = (await services.stateView()).stateRev
+  assert.equal(typeof first, 'number')
+  await services.bots.create({ name: 'Alice' })
+  const second = (await services.stateView()).stateRev
+  assert.ok(second > first)
+  await services.chats.setPinned(services.chats.findDm(services.bots.get('Alice').id).id, false)
+  const third = (await services.stateView()).stateRev
+  assert.ok(third > second)
+})
+
+test('services: mount recomputes auto avatars when the matching rules changed', async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-bot-avatar-refresh-'))
+  t.after(() => rmSync(dir, { recursive: true, force: true }))
+  const ctx = { logger: { warn() {}, error() {} }, get() { return undefined } }
+  const first = createStore(ctx, { dir })
+  const services = createServices({ ctx, store: first })
+  const autoBot = await services.bots.create({ name: '剧情策划', role: '世界观、主线支线与关卡叙事结构的设计者' })
+  const explicitBot = await services.bots.create({ name: '数值策划', role: '属性、公式、成长曲线与经济平衡的设计者', avatar: 'star-star' })
+  // Simulate a stale auto spec written by an older matching table.
+  autoBot.avatar = avatarById('lead-crown')
+  assert.equal(explicitBot.avatarAuto, false)
+  await first.save()
+  await first.close()
+
+  const second = createStore(ctx, { dir })
+  const reopened = createServices({ ctx, store: second })
+  assert.ok(await waitUntil(() => servicesAvatarId(reopened, autoBot.id) === 'writer-quill'))
+  // The explicit pin is never recomputed.
+  assert.equal(servicesAvatarId(reopened, explicitBot.id), 'star-star')
+  // A second mount with nothing to fix writes nothing.
+  let saves = 0
+  const original = second.save
+  second.save = (...args) => {
+    saves += 1
+    return original.apply(second, args)
+  }
+  createServices({ ctx, store: second })
+  await new Promise(resolve => setTimeout(resolve, 30))
+  assert.equal(saves, 0)
+  await second.close()
 })
 
 test('services: an old bot without an avatar still renders one', async (t) => {

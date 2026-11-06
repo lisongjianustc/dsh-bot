@@ -371,13 +371,17 @@ test('api: state is the empty federation before anything exists', async (t) => {
   assert.deepEqual(body.state.schedules, [])
   assert.deepEqual(body.state.helpers, [])
   assert.equal(body.state.settings.language, 'zh')
+  assert.equal(typeof body.stateRev, 'number')
+  assert.equal(body.stateRev, body.state.stateRev)
   assert.ok(body.state.models.providers.length >= 1)
 })
 
 test('api: a bot is created through the route and answered by a real turn', async (t) => {
   const host = makeHost(t)
+  const before = (await host.call('GET', '/state')).body.stateRev
   const created = await host.call('POST', '/bot', { body: { action: 'create', bot: { name: 'Alice', role: 'planner' } } })
   assert.equal(created.status, 200)
+  assert.ok(created.body.state.stateRev > before, 'a write advances stateRev')
   assert.equal(created.body.ok, true)
   assert.equal(created.body.state.bots.length, 1)
   const bot = created.body.state.bots[0]
@@ -621,6 +625,7 @@ test('api: the event stream opens with a full state frame', async (t) => {
   const payload = JSON.parse(lines[0].replace(/^data: /, ''))
   assert.equal(payload.type, 'state')
   assert.deepEqual(payload.state.bots, [])
+  assert.equal(typeof payload.state.stateRev, 'number')
 })
 
 test('api: memory and config routes act on the ledger', async (t) => {

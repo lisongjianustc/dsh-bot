@@ -57,7 +57,7 @@ BotAvatar = {
 ## 4. 自动匹配算法（Host）
 
 1. 取 `name + role + instructions` 拼成文本，转小写。
-2. 对预设的每个关键词做命中计数（zh 直接 includes；en 词边界匹配）；命中数最高者胜。
+2. 评分：**中文关键词长度 → 该长度关键词的出现次数 → 中文总命中次数 → 英文命中次数 → 表序**。中文与英文长度不可直接比较（`narrative` 9 字符会压过 `开发`），英文只在平局时参与；中文单字关键词不参与。
 3. 命中为 0 时：用 `sha1(bot.name + bot.role)` 取模在除 `default-bot` 外的预设里选一个（保证同名同角色稳定，不同角色分散）。
 4. `isMain === true` 且无明确命中 → 优先 `lead-crown`。
 5. 用户显式传 `avatar.id` 时以用户为准；传 `avatar:null` 且 `autoAvatar !== false` 时重新自动匹配。

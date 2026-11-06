@@ -146,6 +146,17 @@ function LeftColumn(props) {
         'div',
         { className: 'db-left-actions' },
         h(ui.IconButton, {
+          icon: 'refresh',
+          label: t('left.refresh'),
+          title: t('left.refreshLabel'),
+          disabled: store.refreshing === true,
+          onClick: function () {
+            store.refreshState().catch(function (error) {
+              store.flash(transport.describeError(t, error), 'error')
+            })
+          },
+        }),
+        h(ui.IconButton, {
           icon: 'plus',
           label: t('left.newBot'),
           title: t('left.newBot'),
