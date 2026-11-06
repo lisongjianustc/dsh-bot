@@ -14,7 +14,10 @@ Create named Bots, chat with them one-on-one, pull them into groups, give them s
 
 English | [中文](README.zh.md)
 
-![Workbench](docs/screenshots/chat-attachments-tools.png)
+![Workbench](docs/screenshots/markdown-table.png)
+
+> **v0.5 highlights** — tool calls now show their arguments and output inline; a right-side file browser previews the project the Bots are working on; memory writes itself (with a review queue you can edit).
+
 
 ## Why
 
@@ -30,11 +33,14 @@ In DSH a Session *is* an Agent. dsh-bot does not invent a second execution layer
 | **Group chats** | `@Name` mentions, admin/all reply modes, `[PASS]` skipping, hop limit with a wrap-up turn, handover of the previous conclusion, and a group note that survives clearing the chat. The main Bot can create/update/delete groups and post into any group. |
 | **Task dispatch** | `bot_dispatch_tasks` / `bot_get_tasks` / `bot_cancel_tasks`: batched background delegation with request-id idempotency, receipts, result relay and cancel cascade. |
 | **Background helpers** | Hidden child sessions for work that should not block the chat; the report comes back and the Bot verifies it in its own words. |
-| **Memory** | One store per Bot plus one shared by the team, selected into the next turn under a 6,000-character budget, with revision guards and a journal. |
+| **Memory** | Team and per-Bot stores, selected into the next turn under a 6,000-character budget with revision guards and a journal — with **automatic capture** and a review queue (see below). |
 | **Schedules** | Daily / every-N / once, delivered by the Host schedule service to a Bot session. |
 | **Rich input** | Text, images and files like the native composer: paste, drag, picker; the Bot receives absolute paths and can read them. |
 | **Avatar library** | 40 original SVG avatars; new Bots auto-match from name/role keywords (unknown roles fall back deterministically). |
 | **Usage** | Turns and characters per Bot over 7/30/90 days; workflow-level task panel. |
+| **Tool details** | Every tool call shows a one-line summary (command, path, URL); expand it to read the arguments and result, with copy buttons. Failed calls open automatically. |
+| **File browser** | A right-side panel lists the Bot / group project directories, previews code with line numbers, Markdown, and images; local file paths in chat are clickable. |
+| **Auto memory** | After a turn, strong instructions are stored automatically; other preferences and conclusions wait as candidates for you to accept, edit or reject. Both team and per-Bot scopes are editable. |
 | **Bilingual** | Chinese and English UI, notices and tool guidance. |
 | **Publish-ready** | 21 model-facing tools, `dsh.bundle` + `dsh.client`, market metadata, icon, locales, CI. |
 
@@ -88,21 +94,27 @@ Browser (client half)                      Host process (host half)
 | [docs/COVERAGE.md](docs/COVERAGE.md) | Feature-by-feature comparison with MiniMax Bot (tools 21/21) and the honest v0.4 backlog |
 | [docs/DELIVERY.md](docs/DELIVERY.md) | Delivery and verification report, milestone history, known limitations |
 | [docs/PROTOCOL.md](docs/PROTOCOL.md) | Frozen Host↔Client contract (routes, SSE frames, data shapes, tools) |
-| [docs/AVATAR-LIBRARY.md](docs/AVATAR-LIBRARY.md) | 24-preset avatar library and the auto-matching algorithm |
+| [docs/AVATAR-LIBRARY.md](docs/AVATAR-LIBRARY.md) | 40-avatar SVG library and the auto-matching algorithm |
 | [docs/AVATAR-PROMPTS.md](docs/AVATAR-PROMPTS.md) | ChatGPT prompts for a consistent image-based avatar set |
 | [docs/PUBLISH.md](docs/PUBLISH.md) | dsh-market publishing checklist |
 
-![Bots & avatars](docs/screenshots/avatar-grid.png)
-![Markdown tables](docs/screenshots/markdown-table.png)
-![Tasks](docs/screenshots/settings-tasks.png)
+## Screens
+
+| | |
+|---|---|
+| ![Markdown tables in chat](docs/screenshots/markdown-table.png) **Chat** — tables, code, avatars | ![Tool details](docs/screenshots/tool-details.png) **Tool details** — arguments and output inline |
+| ![File browser](docs/screenshots/file-browser.png) **File browser** — project directories | ![File preview](docs/screenshots/file-preview.png) **File preview** — code with line numbers |
+| ![Avatar library](docs/screenshots/avatar-grid.png) **40 SVG avatars** with auto-matching | ![Group project directories](docs/screenshots/group-directories.png) **Group project directories** |
+| ![Pinned chats](docs/screenshots/pinned-chats.png) **Pinned chats** | ![Group settings](docs/screenshots/settings-group-edit.png) **Group settings** — members, directories, notes |
 
 ## Roadmap
 
 - [x] Real-session Bots, private/group chats, memory, schedules, helpers, usage
 - [x] Group management tools + task dispatch (21/21 tool parity)
 - [x] Rich input (images/files), per-Bot workspace, 40-avatar SVG library, pinned chats
+- [x] Tool call details, right-side file browser/preview, automatic memory with review queue
 - [ ] Multiple conversations per Bot
-- [ ] Reactions, HTML/Markdown previews, in-workbench approval cards
+- [ ] Reactions, HTML/PDF previews, in-workbench approval cards
 - [ ] Task dependency review turns, usage detail
 
 ## Development

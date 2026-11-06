@@ -14,7 +14,10 @@
 
 [English](README.md) | 中文
 
-![工作台](docs/screenshots/chat-attachments-tools.png)
+![工作台](docs/screenshots/markdown-table.png)
+
+> **v0.5 更新** —— 工具调用现在能看到参数与输出；右侧文件浏览器可直接预览 Bot 正在做的项目；记忆会自动形成，并带一个可编辑的待确认队列。
+
 
 ## 为什么
 
@@ -30,11 +33,14 @@
 | **群聊** | `@名字` 指定成员、admin/all 回复模式、`[PASS]` 跳过、接力跳数上限+收敛回合、handover、跨清空的群备注；主 Bot 可建/改/删群并向任意群发言。 |
 | **任务派单** | `bot_dispatch_tasks` / `bot_get_tasks` / `bot_cancel_tasks`：批量后台派单、request_id 幂等、回执、结果回投、取消级联。 |
 | **后台助手** | 隐藏子会话执行不阻塞聊天；结果回投后 Bot 用自己的话验收。 |
-| **记忆** | 每 Bot 一份 + 团队共享一份；每 turn 6000 字预算、revision 校验、journal。 |
+| **记忆** | 每 Bot 一份 + 团队共享一份；每 turn 6000 字预算、revision 校验、journal；支持**自动形成**与待确认队列（见下）。 |
 | **定时任务** | 每日 / 每 N 分钟 / 一次性，由 Host schedule 服务投递到 Bot 会话。 |
 | **富输入** | 文字、图片、文件（粘贴/拖拽/选择）；Bot 收到绝对路径并可直接读取。 |
 | **头像库** | 40 个原创 SVG 头像；新 Bot 按名字/角色关键词自动匹配，未知角色哈希稳定兜底。 |
 | **用量与任务面板** | 7/30/90 天用量；batch 任务与后台助手统一在「任务」tab 查看。 |
+| **工具详情** | 每次工具调用显示一行摘要（命令/路径/URL），展开即可查看参数与结果并复制；失败自动展开。 |
+| **文件浏览器** | 右侧面板浏览 Bot / 群项目目录，代码带行号预览、Markdown 渲染、图片预览；聊天里的本地路径可直接点击打开。 |
+| **自动记忆** | 每轮结束自动整理：强指令直接记住，其他偏好/结论进入待确认候选，可接受/编辑/忽略；团队与每个 Bot 的记忆都可手动编辑。 |
 | **中英双语 · 市场就绪** | 21 个模型工具、`dsh.bundle`+`dsh.client`、图标/locale/CI 齐全。 |
 
 ## 安装
@@ -87,21 +93,27 @@ node scripts/build-client.mjs
 | [docs/COVERAGE.md](docs/COVERAGE.md) | 与 MiniMax Bot 的逐项对照（工具 21/21）与 v0.4 backlog |
 | [docs/DELIVERY.md](docs/DELIVERY.md) | 交付/验收报告、里程碑、已知限制 |
 | [docs/PROTOCOL.md](docs/PROTOCOL.md) | Host↔Client 冻结契约（路由/SSE/数据形状/工具） |
-| [docs/AVATAR-LIBRARY.md](docs/AVATAR-LIBRARY.md) | 24 预设头像库与自动匹配算法 |
+| [docs/AVATAR-LIBRARY.md](docs/AVATAR-LIBRARY.md) | 40 个 SVG 头像库与自动匹配算法 |
 | [docs/AVATAR-PROMPTS.md](docs/AVATAR-PROMPTS.md) | ChatGPT 图片头像提示词 |
 | [docs/PUBLISH.md](docs/PUBLISH.md) | dsh-market 发布清单 |
 
-![机器人头像（40 个 SVG）](docs/screenshots/avatar-grid.png)
-![Markdown 表格](docs/screenshots/markdown-table.png)
-![任务面板](docs/screenshots/settings-tasks.png)
+## 界面截图
+
+| | |
+|---|---|
+| ![对话与 Markdown 表格](docs/screenshots/markdown-table.png) **对话** — 表格、代码、头像 | ![工具详情](docs/screenshots/tool-details.png) **工具详情** — 参数与输出内联展开 |
+| ![文件浏览器](docs/screenshots/file-browser.png) **文件浏览器** — 项目目录 | ![文件预览](docs/screenshots/file-preview.png) **文件预览** — 代码行号 |
+| ![头像库](docs/screenshots/avatar-grid.png) **40 个 SVG 头像** + 自动匹配 | ![群项目目录](docs/screenshots/group-directories.png) **群组项目目录** |
+| ![置顶会话](docs/screenshots/pinned-chats.png) **会话置顶** | ![群设置](docs/screenshots/settings-group-edit.png) **群设置** — 成员/目录/备注 |
 
 ## 路线图
 
 - [x] 真实会话 Bot、私聊/群聊、记忆、定时、后台助手、用量
 - [x] 群管理工具 + 任务派单（21/21 工具对齐）
 - [x] 富输入（图片/文件）、每 Bot 工作区、40 个 SVG 头像库、会话置顶
+- [x] 工具调用详情、右侧文件浏览器/预览、自动记忆（含待确认队列）
 - [ ] 每个 Bot 多会话
-- [ ] reactions、HTML/Markdown 预览、工作台内审批卡片
+- [ ] reactions、HTML/PDF 预览、工作台内审批卡片
 - [ ] 任务依赖验证回合、用量明细
 
 ## 开发
