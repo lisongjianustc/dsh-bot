@@ -2,16 +2,23 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { Writable } from 'node:stream'
 import test from 'node:test'
 import { apply, inject } from '../src/index.js'
 
 /** Minimal request the route handler can iterate. */
-function mockRequest({ method, url, body, headers = {}, remoteAddress = '127.0.0.1' }) {
-  const payload = body === undefined ? Buffer.alloc(0) : Buffer.from(JSON.stringify(body))
+function mockRequest({ method, url, body, rawBody, headers = {}, remoteAddress = '127.0.0.1' }) {
+  const payload = rawBody !== undefined
+    ? rawBody
+    : (body === undefined ? Buffer.alloc(0) : Buffer.from(JSON.stringify(body)))
   return {
     method,
     url,
-    headers: { 'content-type': 'application/json', 'sec-fetch-site': 'same-origin', ...headers },
+    headers: {
+      'content-type': rawBody === undefined ? 'application/json' : 'application/octet-stream',
+      'sec-fetch-site': 'same-origin',
+      ...headers,
+    },
     socket: { remoteAddress },
     async *[Symbol.asyncIterator]() {
       if (payload.length > 0) yield payload
@@ -43,6 +50,25 @@ function mockResponse() {
   }
 }
 
+/** A Writable response for the /media stream route. */
+function streamResponse() {
+  const chunks = []
+  const res = new Writable({
+    write(chunk, _encoding, callback) {
+      chunks.push(Buffer.from(chunk))
+      callback()
+    },
+  })
+  res.status = 0
+  res.headers = {}
+  res.writeHead = (status, headers) => {
+    res.status = status
+    res.headers = headers ?? {}
+  }
+  res.body = () => Buffer.concat(chunks)
+  return res
+}
+
 function makeHost(t) {
   const dir = mkdtempSync(join(tmpdir(), 'dsh-bot-host-'))
   const previousHome = process.env.DSH_HOME
@@ -69,10 +95,18 @@ function makeHost(t) {
     path: dir,
     attachSession: async () => {},
   }
+  const userWorkspace = {
+    id: 'ws-user',
+    title: 'User Project',
+    path: dir,
+    attachSession: async () => {},
+  }
+  const createdWorkspaceIds = []
 
   const controller = {
-    async create() {
+    async create(request) {
       created += 1
+      createdWorkspaceIds.push(request?.workspaceId)
       const sessionId = `session-${created}`
       live.set(sessionId, { id: sessionId, header: {} })
       return { sessionId }
@@ -225,8 +259,13 @@ function makeHost(t) {
           async create() {
             return workspace
           },
-          get() {
-            return workspace
+          list() {
+            return [workspace, userWorkspace]
+          },
+          get(id) {
+            if (id === 'ws-user') return userWorkspace
+            if (id === 'ws-bot') return workspace
+            return undefined
           },
         }
       }
@@ -290,7 +329,7 @@ function makeHost(t) {
     return { status: res.status, body: parsed, raw: res.body, res }
   }
 
-  return { ctx, dir, routes, route, call, prompts, cancels, tools, sections, live, emit, setPromptMode, registrations }
+  return { ctx, dir, routes, route, call, prompts, cancels, tools, sections, live, emit, setPromptMode, registrations, createdWorkspaceIds }
 }
 
 async function waitFor(predicate, timeoutMs = 3000) {
@@ -310,7 +349,7 @@ test('plugin entry: hard dependencies and one API route', (t) => {
   assert.equal(host.routes[0].path, '/dsh-bot/api')
   assert.equal(host.sections.length, 1)
   assert.equal(host.sections[0].name, 'dsh-bot:bot-persona')
-  assert.equal(host.tools.length, 18)
+  assert.equal(host.tools.length, 21)
 })
 
 test('plugin entry: approval answerers are registered prepended and global', (t) => {
@@ -397,6 +436,100 @@ test('api: a turn that ends around an unreturned tool settles the tool part', as
   assert.notEqual(tool.status, 'running')
   assert.equal(tool.status, 'failed')
   assert.match(tool.error, /本轮已结束|ended before this tool reported a result/)
+})
+
+test('api: an upload is stored once and served back as a media stream', async (t) => {
+  const host = makeHost(t)
+  const bytes = Buffer.from('fake png bytes for the integration test')
+  const first = await host.call('POST', '/upload?name=pic.png', { rawBody: bytes, headers: { 'content-type': 'image/png' } })
+  assert.equal(first.status, 200)
+  assert.equal(first.body.ok, true)
+  const attachment = first.body.attachment
+  assert.match(attachment.id, /^[0-9a-f]{12}$/)
+  assert.equal(attachment.name, 'pic.png')
+  assert.equal(attachment.mime, 'image/png')
+  assert.equal(attachment.size, bytes.length)
+  assert.equal(attachment.url, `dsh-bot/api/media?id=${attachment.id}`)
+  // Content addressing: the same bytes answer the same attachment id.
+  const again = await host.call('POST', '/upload?name=copy.png', { rawBody: bytes, headers: { 'content-type': 'image/png' } })
+  assert.equal(again.body.attachment.id, attachment.id)
+  // The media route streams the exact bytes.
+  const res = streamResponse()
+  const finished = new Promise(resolve => res.on('finish', resolve))
+  await host.route.handler(mockRequest({ method: 'GET', url: `/dsh-bot/api/media?id=${attachment.id}` }), res)
+  await finished
+  assert.equal(res.status, 200)
+  assert.equal(res.headers['content-type'], 'image/png')
+  assert.equal(res.headers['x-content-type-options'], 'nosniff')
+  assert.deepEqual(res.body(), bytes)
+  // An unknown id is a named refusal.
+  const missing = await host.call('GET', '/media?id=deadbeef0000')
+  assert.equal(missing.status, 400)
+  assert.equal(missing.body.code, 'invalid-request')
+})
+
+test('api: a message carries attachment parts and the prompt carries absolute paths', async (t) => {
+  const host = makeHost(t)
+  const created = await host.call('POST', '/bot', { body: { action: 'create', bot: { name: 'Alice' } } })
+  const chat = created.body.state.chats[0]
+  const bytes = Buffer.from('report body')
+  const upload = await host.call('POST', '/upload?name=report.txt', { rawBody: bytes, headers: { 'content-type': 'text/plain' } })
+  const attachment = upload.body.attachment
+  const sent = await host.call('POST', '/chat', {
+    body: { action: 'send', chatId: chat.id, text: 'read this', attachments: [attachment.id] },
+  })
+  assert.equal(sent.status, 200)
+  assert.ok(await waitFor(async () => {
+    const page = await host.call('GET', `/messages?chatId=${encodeURIComponent(chat.id)}`)
+    return page.body.messages.some(message => message.role === 'bot' && message.status === 'done')
+  }))
+  const page = await host.call('GET', `/messages?chatId=${encodeURIComponent(chat.id)}`)
+  const user = page.body.messages.find(message => message.role === 'user')
+  assert.deepEqual(user.parts[0], { type: 'file', attachment })
+  assert.equal(user.parts[1].type, 'text')
+  assert.equal(user.attachments.length, 1)
+  assert.equal(user.attachments[0].id, attachment.id)
+  // The prompt carries the absolute path so the Bot can open the file.
+  assert.match(host.prompts[0].content[0].text, /\[attachments\]/)
+  assert.match(host.prompts[0].content[0].text, /report\.txt/)
+  assert.match(host.prompts[0].content[0].text, /uploads/)
+  // An unknown attachment id refuses the send.
+  const refused = await host.call('POST', '/chat', {
+    body: { action: 'send', chatId: chat.id, text: 'x', attachments: ['missing'] },
+  })
+  assert.equal(refused.status, 400)
+  assert.equal(refused.body.code, 'invalid-request')
+  // A raw body over the upload cap is refused before it is stored.
+  const huge = await host.call('POST', '/upload?name=big.bin', { rawBody: Buffer.alloc(25 * 1024 * 1024 + 1) })
+  assert.equal(huge.status, 413)
+  assert.equal(huge.body.code, 'body-too-large')
+})
+
+test('api: a bot can pin a workspace and its sessions are created there', async (t) => {
+  const host = makeHost(t)
+  const created = await host.call('POST', '/bot', { body: { action: 'create', bot: { name: 'Alice', workspaceId: 'ws-user' } } })
+  assert.equal(created.body.ok, true)
+  assert.equal(created.body.state.bots[0].workspaceId, 'ws-user')
+  assert.deepEqual(created.body.state.workspaces.map(row => row.id), ['ws-bot', 'ws-user'])
+  const chat = created.body.state.chats[0]
+  await host.call('POST', '/chat', { body: { action: 'send', chatId: chat.id, text: 'hello' } })
+  assert.ok(await waitFor(async () => {
+    const page = await host.call('GET', `/messages?chatId=${encodeURIComponent(chat.id)}`)
+    return page.body.messages.some(message => message.role === 'bot' && message.status === 'done')
+  }))
+  assert.deepEqual(host.createdWorkspaceIds, ['ws-user'])
+  // A default bot creates its session in the shared bot workspace.
+  const second = await host.call('POST', '/bot', { body: { action: 'create', bot: { name: 'Bob' } } })
+  const bobChat = second.body.state.chats.find(entry => entry.title === 'Bob')
+  await host.call('POST', '/chat', { body: { action: 'send', chatId: bobChat.id, text: 'hi' } })
+  assert.ok(await waitFor(async () => {
+    const page = await host.call('GET', `/messages?chatId=${encodeURIComponent(bobChat.id)}`)
+    return page.body.messages.some(message => message.role === 'bot' && message.status === 'done')
+  }))
+  assert.deepEqual(host.createdWorkspaceIds, ['ws-user', 'ws-bot'])
+  const rejected = await host.call('POST', '/bot', { body: { action: 'create', bot: { name: 'Carol', workspaceId: 'ws-missing' } } })
+  assert.equal(rejected.status, 503)
+  assert.equal(rejected.body.code, 'workspace-unavailable')
 })
 
 test('api: a bot carries autoApprove and the panel can switch it off', async (t) => {

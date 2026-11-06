@@ -111,6 +111,12 @@ export function defaultState(userName = defaultUserName()) {
     schedules: {},
     /** helperId -> background-helper record */
     helpers: [],
+    /** attachmentId -> uploaded-file record */
+    attachments: {},
+    /** taskId -> dispatched-task record */
+    tasks: [],
+    /** batchId -> dispatch batch receipt metadata */
+    taskBatches: {},
   }
 }
 
@@ -203,10 +209,12 @@ export function createStore(ctx, options = {}) {
   const statePath = join(homeDir, 'state.json')
   const messagesDir = join(homeDir, 'messages')
   const usagePath = join(homeDir, 'usage.jsonl')
+  const uploadsDir = join(homeDir, 'uploads')
   const workspaceDir = botWorkspaceDirectory(homeDir)
 
   mkdirSync(messagesDir, { recursive: true })
   mkdirSync(workspaceDir, { recursive: true })
+  mkdirSync(uploadsDir, { recursive: true })
 
   let db
   if (existsSync(statePath)) {
@@ -240,6 +248,9 @@ export function createStore(ctx, options = {}) {
   db.memory.bots = typeof db.memory.bots === 'object' && db.memory.bots !== null && !Array.isArray(db.memory.bots) ? db.memory.bots : {}
   db.schedules = typeof db.schedules === 'object' && db.schedules !== null && !Array.isArray(db.schedules) ? db.schedules : {}
   db.helpers = Array.isArray(db.helpers) ? db.helpers : []
+  db.attachments = typeof db.attachments === 'object' && db.attachments !== null && !Array.isArray(db.attachments) ? db.attachments : {}
+  db.tasks = Array.isArray(db.tasks) ? db.tasks : []
+  db.taskBatches = typeof db.taskBatches === 'object' && db.taskBatches !== null && !Array.isArray(db.taskBatches) ? db.taskBatches : {}
   db.self = typeof db.self === 'object' && db.self !== null ? db.self : { id: 'owner', name: defaultUserName() }
   db.version = Number.isFinite(db.version) ? db.version : STATE_VERSION
   db.rev = Number.isFinite(db.rev) ? db.rev : 1
@@ -374,6 +385,7 @@ export function createStore(ctx, options = {}) {
     workspaceDir,
     statePath,
     messagesDir,
+    uploadsDir,
     usagePath,
     get db() {
       return db

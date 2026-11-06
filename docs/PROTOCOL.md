@@ -25,12 +25,14 @@
 | GET | `dsh-bot/api/state` | — | `{ ok, state }`（StateView，见 §3） |
 | POST | `dsh-bot/api/bot` | `{ action:'create'|'update'|'delete', bot? , botId? }` | `{ ok, state }` |
 | POST | `dsh-bot/api/group` | `{ action:'create'|'update'|'delete', group?, groupId? }`（update 支持 `noteEntries:[]` 清空群备注） | `{ ok, state }` |
-| POST | `dsh-bot/api/chat` | `{ action:'send'|'cancel'|'retry'|'read'|'clear'|'create', chatId?, botId?, groupId?, text?, clientMessageId? }` | `{ ok, state, chat? }`（read 只回 `{ok,chat}`） |
+| POST | `dsh-bot/api/chat` | `{ action:'send'|'cancel'|'retry'|'read'|'clear'|'create', chatId?, botId?, groupId?, text?, clientMessageId?, attachments?: string[] }` | `{ ok, state, chat? }`（read 只回 `{ok,chat}`） |
 | GET | `dsh-bot/api/messages?chatId=&before=&limit=` | — | `{ ok, messages:Message[], hasMore:boolean }` |
 | GET | `dsh-bot/api/usage?days=7` | — | `{ ok, usage:UsageView }` |
 | POST | `dsh-bot/api/memory` | `{ action:'list'|'remember'|'forget', scope, text?, key?, id?, pinned?, targetBotId? }` | `{ ok, entries? }` |
 | POST | `dsh-bot/api/schedule` | `{ action:'create'|'update'|'list'|'delete'|'run', scheduleId?, botId?, title?, prompt?, timing? }` | `{ ok, state, schedules? }` |
 | GET | `dsh-bot/api/events?since=<seq>` | SSE | 见 §4 |
+| POST | `dsh-bot/api/upload?name=<name>` | 原始字节（`application/octet-stream` 或图片 mime），≤25 MiB | `{ ok, attachment:{id,name,size,mime,url} }` |
+| GET | `dsh-bot/api/media?id=<attachmentId>` | — | 文件流（图片 inline，其余 attachment） |
 | POST | `dsh-bot/api/config` | `{ patch:{ userName?, language? } }` | `{ ok, state }` |
 
 会话错误码（`code`）：`invalid-request`、`bot-not-found`、`chat-not-found`、`group-not-found`、`session-busy`、`model-unavailable`、`ledger-unavailable`、`internal`。
@@ -47,6 +49,14 @@ StateView = {
   limits: { maxHops:number, memoryEntryMax:number, memoryStorageMax:number, groupNoteMax:number },
   schedules: ScheduleView[],
   helpers: HelperView[],
+  tasks: TaskView[],
+  workspaces: { id:string, title:string, path?:string }[],
+}
+
+TaskView = {
+  id, kind:'bot'|'discussion', botId?, groupId?, text, title,
+  status:'queued'|'running'|'done'|'failed'|'cancelled'|'unknown',
+  requestId?, batchId?, dependsOn?:string[], result?, error?, messageId?, createdAt, startedAt?, endedAt?,
 }
 
 HelperView = {
@@ -66,8 +76,12 @@ Bot = {
   id, name, role, instructions, skin, color, avatar?, isMain:boolean,
   model: { provider:string, model:string, reasoningEffort?:string } | null,
   permission: 'read-only'|'workspace-write'|'danger-full-access',
-  autoHelper:boolean, autoApprove:boolean, createdAt:number, updatedAt:number, rev:number,
+  autoHelper:boolean, autoApprove:boolean,
+  avatar: BotAvatar | null, workspaceId?: string,
+  createdAt:number, updatedAt:number, rev:number,
 }
+
+BotAvatar = { kind:'library', id:string, motif:string, color:string, background:string }
 Group = {
   id, name, adminId, memberIds:string[], notice, replyMode:'admin'|'all',
   maxHops:number, handover:boolean, useNote:boolean,
@@ -81,9 +95,16 @@ Chat = {
 Message = {
   id, chatId, seq:number, ts:number, role:'user'|'bot'|'relay'|'system',
   botId?:string, text:string, status:'pending'|'streaming'|'done'|'error'|'pass'|'aborted'|'held',
-  parts: ({type:'text',text:string} | {type:'tool',name:string,status:'running'|'ok'|'failed',error?:string} | {type:'event',text:string})[],
+  parts: ({type:'text',text:string}
+        | {type:'tool',name:string,status:'running'|'ok'|'failed'|'unknown',error?:string}
+        | {type:'image', attachment:AttachmentView}
+        | {type:'file', attachment:AttachmentView}
+        | {type:'event',text:string})[],
+  attachments?: AttachmentView[],
   turnId?:string, sessionId?:string, error?:string, clientMessageId?:string,
 }
+AttachmentView = { id, name, size, mime, url }
+
 UsageView = { days:number, total:{turns:number,chars:number}, byDay:{day:string,turns:number,chars:number}[], byBot:{botId:string,name:string,turns:number,chars:number}[] }
 ```
 
@@ -133,7 +154,7 @@ ID 规则：`bot_<12hex>`、`grp_<12hex>`、`chat_<12hex>`、`msg_<12hex>`、`no
 
 ## 7. 模型可见工具（M1 先注册最小集，M4 补齐）
 
-`bot_list_team`、`bot_create`、`bot_update`、`bot_delete`、`bot_create_group`、`bot_update_group`、`bot_delete_group`、`bot_message`、`bot_post_group`、`bot_remember`、`bot_recall`、`bot_forget`、`bot_create_schedule`、`bot_list_schedules`、`bot_delete_schedule`、`bot_start_helper`、`bot_list_helpers`、`bot_stop_helper`。全部用**裸 ToolDefinition** 注册（`{name,description,parameters:JSONSchema,output:{schema,render},execute}`，不 import `@deepseek-ai/dsh-tools`），`execute(args, exec)` 用 `exec.agent.id` 认 caller；仅对 Bot 会话可见：`ctx.tools.register(def, { when: ({agent}) => services.bots.botOfSession(agent?.id) !== undefined })`。
+`bot_list_team`、`bot_create`、`bot_update`、`bot_delete`、`bot_create_group`、`bot_update_group`、`bot_delete_group`、`bot_message`、`bot_dispatch_tasks`、`bot_get_tasks`、`bot_cancel_tasks`、`bot_post_group`、`bot_remember`、`bot_recall`、`bot_forget`、`bot_create_schedule`、`bot_list_schedules`、`bot_delete_schedule`、`bot_start_helper`、`bot_list_helpers`、`bot_stop_helper`（21 个，与 MiniMax Bot 对齐）。全部用**裸 ToolDefinition** 注册（`{name,description,parameters:JSONSchema,output:{schema,render},execute}`，不 import `@deepseek-ai/dsh-tools`），`execute(args, exec)` 用 `exec.agent.id` 认 caller；仅对 Bot 会话可见：`ctx.tools.register(def, { when: ({agent}) => services.bots.botOfSession(agent?.id) !== undefined })`。
 
 ## 8. M0 事实（platform probe 已确认 / 待补充）
 

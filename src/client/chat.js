@@ -169,6 +169,99 @@ function ToolRow(props) {
   )
 }
 
+/** Human-readable byte size. */
+function formatBytes(value) {
+  var bytes = typeof value === 'number' && isFinite(value) ? value : 0
+  if (bytes < 1024) return bytes + ' B'
+  var kb = bytes / 1024
+  if (kb < 1024) return (kb < 10 ? kb.toFixed(1) : Math.round(kb)) + ' KB'
+  var mb = kb / 1024
+  return (mb < 10 ? mb.toFixed(1) : Math.round(mb)) + ' MB'
+}
+
+/** Open one attachment URL in a new tab without a popup handle. */
+function attachmentHref(attachment) {
+  return typeof attachment.url === 'string' ? attachment.url : ''
+}
+
+/** Inline image card; opens the full image in a new tab. */
+function ImageAttachment(props) {
+  var attachment = props.attachment === undefined || props.attachment === null ? {} : props.attachment
+  var name = String(attachment.name === undefined ? 'image' : attachment.name)
+  var url = attachmentHref(attachment)
+  var pairBroken = React.useState(false)
+  var broken = pairBroken[0]
+  var setBroken = pairBroken[1]
+  var showImage = url !== '' && !broken
+  var card = h(
+    'div',
+    { className: 'db-attach db-attach-image' },
+    showImage
+      ? h('img', {
+          src: url,
+          alt: name,
+          loading: 'lazy',
+          onError: function () {
+            setBroken(true)
+          },
+        })
+      : h('div', { className: 'db-attach-placeholder', style: { blockSize: '120px' } }, h(Icon, { name: 'image', size: 26 })),
+    h('span', { className: 'db-attach-caption' }, name),
+  )
+  if (url === '') return card
+  return h(
+    'a',
+    {
+      className: 'db-attach-link',
+      href: url,
+      target: '_blank',
+      rel: 'noopener noreferrer',
+      title: name,
+    },
+    card,
+  )
+}
+
+/** File card; the anchor downloads it (or opens it when the browser cannot). */
+function FileAttachment(props) {
+  var attachment = props.attachment === undefined || props.attachment === null ? {} : props.attachment
+  var name = String(attachment.name === undefined ? 'file' : attachment.name)
+  var url = attachmentHref(attachment)
+  var card = h(
+    'div',
+    { className: 'db-attach db-attach-file' },
+    h(Icon, { name: 'file', size: 16 }),
+    h(
+      'span',
+      { className: 'db-attach-main' },
+      h('span', { className: 'db-attach-name' }, name),
+      h('span', { className: 'db-attach-meta' }, formatBytes(attachment.size)),
+    ),
+    h(Icon, { name: 'download', size: 14 }),
+  )
+  if (url === '') return card
+  return h(
+    'a',
+    {
+      className: 'db-attach-link',
+      href: url,
+      download: name,
+      target: '_blank',
+      rel: 'noopener noreferrer',
+      title: name,
+    },
+    card,
+  )
+}
+
+/** Render one Message part of type image/file, or nothing for other types. */
+function attachmentNode(part, key) {
+  if (part === null || part === undefined) return null
+  if (part.type === 'image') return h(ImageAttachment, { key: key, attachment: part.attachment })
+  if (part.type === 'file') return h(FileAttachment, { key: key, attachment: part.attachment })
+  return null
+}
+
 /** One rendered message row. */
 function MessageRow(props) {
   var t = props.t
@@ -194,6 +287,7 @@ function MessageRow(props) {
   var text = textOf(message)
   var parts = Array.isArray(message.parts) ? message.parts : []
   var hasContent = false
+  var hasAttachment = false
   for (var i = 0; i < parts.length; i += 1) {
     var part = parts[i]
     if (part === null || part === undefined) continue
@@ -218,6 +312,10 @@ function MessageRow(props) {
     if (current === null || current === undefined) continue
     if (current.type === 'tool') {
       nodes.push(h(ToolRow, { key: 'tool-' + k, tool: current, t: t, messageDone: messageDone }))
+    } else if (current.type === 'image' || current.type === 'file') {
+      var attachmentPart = attachmentNode(current, 'attach-' + k)
+      if (attachmentPart !== null) nodes.push(h('div', { key: 'attach-wrap-' + k, className: 'db-attachments' }, attachmentPart))
+      hasAttachment = true
     } else if (current.type === 'event') {
       if (typeof current.text === 'string' && current.text !== '') {
         nodes.push(h('div', { key: 'event-' + k, className: 'db-event' }, current.text))
@@ -230,6 +328,15 @@ function MessageRow(props) {
           markdown.render(current.text, streaming && k === lastTextIndex ? 'db-cursor' : undefined),
         ),
       )
+    }
+  }
+  if (!hasAttachment && Array.isArray(message.attachments)) {
+    for (var ai = 0; ai < message.attachments.length; ai += 1) {
+      var flat = message.attachments[ai]
+      if (flat === null || flat === undefined) continue
+      var mime = String(flat.mime === undefined ? '' : flat.mime)
+      var flatPart = mime.indexOf('image/') === 0 ? { type: 'image', attachment: flat } : { type: 'file', attachment: flat }
+      nodes.push(h('div', { key: 'flat-' + ai, className: 'db-attachments' }, attachmentNode(flatPart, 'flat-' + ai)))
     }
   }
   if (nodes.length === 0 && text !== '') {
@@ -347,7 +454,7 @@ function MessageRow(props) {
           name: name,
           color: isRelay ? undefined : color,
           size: 'sm',
-          image: bot === undefined ? undefined : bot.avatar,
+          avatar: bot === undefined || bot === null ? undefined : bot.avatar,
         })
       : null,
     h(
@@ -367,6 +474,10 @@ function MessageRow(props) {
   )
 }
 
+/** Attachment limits shared with the Host contract. */
+var MAX_ATTACHMENTS = 8
+var MAX_UPLOAD_BYTES = 25 * 1024 * 1024
+
 /** The composer for one chat; mounted per chat so its draft resets cleanly. */
 function Composer(props) {
   var t = props.t
@@ -378,11 +489,32 @@ function Composer(props) {
   var sending = React.useState(false)
   var isSending = sending[0]
   var setSending = sending[1]
+  var pairAttachments = React.useState([])
+  var attachments = pairAttachments[0]
+  var setAttachments = pairAttachments[1]
+  var pairMenu = React.useState(false)
+  var menuOpen = pairMenu[0]
+  var setMenuOpen = pairMenu[1]
+  var pairDrag = React.useState(false)
+  var dragging = pairDrag[0]
+  var setDragging = pairDrag[1]
   var areaRef = React.useRef(null)
+  var imageInputRef = React.useRef(null)
+  var fileInputRef = React.useRef(null)
+  var attachmentsRef = React.useRef(attachments)
+  attachmentsRef.current = attachments
   var quote = store.quoteOf(chat.id)
   var running = store.runningOf(chat.id)
   var runningBot = running === undefined ? undefined : store.botById(running.botId)
   var runningName = runningBot === undefined ? undefined : runningBot.name
+
+  var uploading = attachments.some(function (item) {
+    return item.status === 'uploading'
+  })
+  var readyAttachments = attachments.filter(function (item) {
+    return item.status === 'done' && typeof item.id === 'string'
+  })
+  var canSend = isSending === false && uploading === false && (value.trim() !== '' || readyAttachments.length > 0)
 
   function resize() {
     var element = areaRef.current
@@ -394,6 +526,22 @@ function Composer(props) {
   React.useEffect(function () {
     resize()
   }, [value])
+
+  // Release object-preview URLs when this composer unmounts.
+  React.useEffect(function () {
+    return function () {
+      var current = attachmentsRef.current
+      for (var i = 0; i < current.length; i += 1) {
+        if (typeof current[i].previewUrl === 'string' && current[i].previewUrl !== '') {
+          try {
+            URL.revokeObjectURL(current[i].previewUrl)
+          } catch (error) {
+            /* already revoked */
+          }
+        }
+      }
+    }
+  }, [])
 
   // A quote is materialised in the composer itself as `> …` lines, and the
   // one-shot request is consumed immediately so it cannot be applied twice.
@@ -424,13 +572,123 @@ function Composer(props) {
     [quote],
   )
 
+  function uploadEntry(entry, file) {
+    store.uploadAttachment(file).then(
+      function (view) {
+        setAttachments(function (previous) {
+          return previous.map(function (item) {
+            if (item.localId !== entry.localId) return item
+            return Object.assign({}, item, {
+              status: 'done',
+              id: view.id,
+              name: view.name,
+              size: view.size,
+              mime: view.mime,
+              url: view.url,
+            })
+          })
+        })
+      },
+      function (error) {
+        setAttachments(function (previous) {
+          return previous.map(function (item) {
+            if (item.localId !== entry.localId) return item
+            return Object.assign({}, item, { status: 'error', error: transport.describeError(t, error) })
+          })
+        })
+        store.flash(transport.describeError(t, error), 'error')
+      },
+    )
+  }
+
+  function addFiles(fileList) {
+    var files = []
+    if (fileList !== undefined && fileList !== null) {
+      for (var i = 0; i < fileList.length; i += 1) files.push(fileList[i])
+    }
+    if (files.length === 0) return
+    var next = attachments.slice()
+    var accepted = []
+    var rejectedForCount = false
+    for (var f = 0; f < files.length; f += 1) {
+      var file = files[f]
+      if (next.length >= MAX_ATTACHMENTS) {
+        rejectedForCount = true
+        continue
+      }
+      if (typeof file.size === 'number' && file.size > MAX_UPLOAD_BYTES) {
+        store.flash(t('composer.tooLarge', { name: String(file.name) }), 'error')
+        continue
+      }
+      var mime = typeof file.type === 'string' ? file.type : ''
+      var isImage = mime.indexOf('image/') === 0
+      var entry = {
+        localId: 'local_' + Math.random().toString(16).slice(2) + Date.now().toString(16),
+        file: file,
+        name: String(file.name === undefined ? 'file' : file.name),
+        size: typeof file.size === 'number' ? file.size : 0,
+        mime: mime === '' ? 'application/octet-stream' : mime,
+        status: 'uploading',
+        error: '',
+        previewUrl: '',
+      }
+      if (isImage && typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function') {
+        try {
+          entry.previewUrl = URL.createObjectURL(file)
+        } catch (error) {
+          entry.previewUrl = ''
+        }
+      }
+      next.push(entry)
+      accepted.push(entry)
+    }
+    if (rejectedForCount) store.flash(t('composer.tooMany', { max: String(MAX_ATTACHMENTS) }), 'error')
+    if (accepted.length === 0) return
+    setAttachments(next)
+    for (var a = 0; a < accepted.length; a += 1) uploadEntry(accepted[a], accepted[a].file)
+  }
+
+  function removeAttachment(entry) {
+    setAttachments(function (previous) {
+      return previous.filter(function (item) {
+        return item.localId !== entry.localId
+      })
+    })
+    if (typeof entry.previewUrl === 'string' && entry.previewUrl !== '') {
+      try {
+        URL.revokeObjectURL(entry.previewUrl)
+      } catch (error) {
+        /* already revoked */
+      }
+    }
+  }
+
+  function pickFiles(which) {
+    setMenuOpen(false)
+    var input = which === 'image' ? imageInputRef.current : fileInputRef.current
+    if (input !== null && input !== undefined) input.click()
+  }
+
   function submit() {
+    if (!canSend) return
     var text = value.trim()
-    if (text === '' || isSending) return
+    var views = readyAttachments.map(function (item) {
+      return { id: item.id, name: item.name, size: item.size, mime: item.mime, url: item.url }
+    })
     setValue('')
     store.setDraft(chat.id, '')
+    for (var i = 0; i < attachments.length; i += 1) {
+      if (typeof attachments[i].previewUrl === 'string' && attachments[i].previewUrl !== '') {
+        try {
+          URL.revokeObjectURL(attachments[i].previewUrl)
+        } catch (error) {
+          /* already revoked */
+        }
+      }
+    }
+    setAttachments([])
     setSending(true)
-    store.send(chat.id, text).then(
+    store.send(chat.id, text, views).then(
       function () {
         setSending(false)
       },
@@ -450,20 +708,119 @@ function Composer(props) {
     }
   }
 
+  function onPaste(event) {
+    var clipboard = event.clipboardData
+    if (clipboard === undefined || clipboard === null) return
+    if (clipboard.files !== undefined && clipboard.files !== null && clipboard.files.length > 0) {
+      event.preventDefault()
+      addFiles(clipboard.files)
+    }
+  }
+
+  function onDrop(event) {
+    event.preventDefault()
+    setDragging(false)
+    if (event.dataTransfer !== undefined && event.dataTransfer !== null) addFiles(event.dataTransfer.files)
+  }
+
   var placeholder =
     chat.kind === 'group'
       ? t('chat.placeholderGroup', { name: store.chatTitle(chat) })
       : t('chat.placeholder', { name: store.chatTitle(chat) })
 
+  var chips = null
+  if (attachments.length > 0) {
+    chips = h(
+      'div',
+      { className: 'db-attach-strip' },
+      attachments.map(function (item) {
+        var isImage = String(item.mime).indexOf('image/') === 0
+        return h(
+          'div',
+          { key: item.localId, className: 'db-chip' + (item.status === 'error' ? ' is-error' : '') },
+          item.previewUrl !== ''
+            ? h('img', { className: 'db-chip-thumb', src: item.previewUrl, alt: item.name })
+            : h('span', { className: 'db-chip-glyph' }, h(Icon, { name: isImage ? 'image' : 'file', size: 14 })),
+          h(
+            'span',
+            { className: 'db-chip-main' },
+            h('span', { className: 'db-chip-name', title: item.name }, item.name),
+            item.status === 'uploading'
+              ? h('span', { className: 'db-chip-meta' }, h('span', { className: 'db-spinner db-chip-spinner' }), t('composer.uploading'))
+              : item.status === 'error'
+                ? h('span', { className: 'db-chip-meta' }, item.error)
+                : h('span', { className: 'db-chip-meta' }, formatBytes(item.size)),
+          ),
+          item.status === 'uploading' ? h('span', { className: 'db-chip-bar' }) : null,
+          h(ui.IconButton, {
+            icon: 'x',
+            size: 12,
+            label: t('composer.remove'),
+            title: t('composer.remove'),
+            onClick: function () {
+              removeAttachment(item)
+            },
+          }),
+        )
+      }),
+    )
+  }
+
   return h(
     'div',
-    { className: 'db-composer' },
+    {
+      className: 'db-composer',
+      onDragOver: function (event) {
+        if (event.dataTransfer !== undefined && event.dataTransfer !== null) {
+          event.preventDefault()
+          setDragging(true)
+        }
+      },
+      onDragLeave: function () {
+        setDragging(false)
+      },
+      onDrop: onDrop,
+    },
     h(
       'div',
-      { className: 'db-composer-inner' },
+      { className: 'db-composer-inner' + (dragging ? ' is-dragging' : '') },
+      dragging ? h('div', { className: 'db-drop-hint', 'aria-hidden': 'true' }, h(Icon, { name: 'paperclip', size: 16 }), t('composer.drop')) : null,
+      chips,
       h(
         'div',
         { className: 'db-composer-box' },
+        menuOpen
+          ? h(
+              'div',
+              { className: 'db-attach-menu', role: 'menu' },
+              h(
+                'button',
+                {
+                  type: 'button',
+                  role: 'menuitem',
+                  className: 'db-attach-menu-item',
+                  onClick: function () {
+                    pickFiles('image')
+                  },
+                },
+                h(Icon, { name: 'image', size: 14 }),
+                t('composer.image'),
+              ),
+              h(
+                'button',
+                {
+                  type: 'button',
+                  role: 'menuitem',
+                  className: 'db-attach-menu-item',
+                  onClick: function () {
+                    pickFiles('file')
+                  },
+                },
+                h(Icon, { name: 'file', size: 14 }),
+                t('composer.file'),
+              ),
+            )
+          : null,
         h('textarea', {
           ref: areaRef,
           className: 'db-input',
@@ -477,11 +834,22 @@ function Composer(props) {
             resize()
           },
           onKeyDown: onKeyDown,
+          onPaste: onPaste,
         }),
         h(
           'div',
           { className: 'db-composer-foot' },
-          h('span', { className: 'db-composer-hint' }, t('chat.hint.send')),
+          h(ui.IconButton, {
+            icon: 'plus',
+            label: t('composer.add'),
+            title: t('composer.add'),
+            active: menuOpen,
+            disabled: isSending || attachments.length >= MAX_ATTACHMENTS,
+            onClick: function () {
+              setMenuOpen(!menuOpen)
+            },
+          }),
+          h('span', { className: 'db-composer-hint' }, attachments.length > 0 ? t('composer.count', { count: String(attachments.length), max: String(MAX_ATTACHMENTS) }) : t('chat.hint.send')),
           running === undefined
             ? null
             : h(
@@ -504,7 +872,7 @@ function Composer(props) {
             {
               type: 'button',
               className: 'db-send',
-              disabled: value.trim() === '' || running !== undefined,
+              disabled: !canSend,
               title: running === undefined ? t('chat.send') : t('chat.sendBlocked'),
               'aria-label': t('chat.send'),
               onClick: submit,
@@ -514,6 +882,46 @@ function Composer(props) {
         ),
       ),
     ),
+    h('input', {
+      ref: imageInputRef,
+      type: 'file',
+      accept: 'image/*',
+      multiple: true,
+      hidden: true,
+      onChange: function (event) {
+        addFiles(event.target.files)
+        event.target.value = ''
+      },
+    }),
+    h('input', {
+      ref: fileInputRef,
+      type: 'file',
+      multiple: true,
+      hidden: true,
+      onChange: function (event) {
+        addFiles(event.target.files)
+        event.target.value = ''
+      },
+    }),
+  )
+}
+
+/** Running background helpers for one chat, shown above its timeline. */
+function ChatActivityBar(props) {
+  var t = props.t
+  var store = props.store
+  var chat = props.chat
+  var list = store.helpers().filter(function (helper) {
+    return helper !== null && helper.chatId === chat.id && (helper.status === 'running' || helper.status === 'queued')
+  })
+  if (list.length === 0) return null
+  var first = list[0]
+  return h(
+    'div',
+    { className: 'db-activity', role: 'status' },
+    h(Spinner, null),
+    h('span', { className: 'db-activity-text' }, t('chat.helpersRunning', { count: String(list.length) })),
+    h('span', { className: 'db-activity-title', title: String(first.title === undefined ? first.task : first.title) }, String(first.title === undefined ? first.task : first.title)),
   )
 }
 
@@ -691,7 +1099,7 @@ function ChatPane(props) {
       }),
       chat.kind === 'group'
         ? h('span', { className: 'db-avatar is-sm', style: { background: 'color-mix(in srgb, var(--dsw-alias-brand-primary) 14%, transparent)', color: 'var(--dsw-alias-brand-primary)' } }, h(Icon, { name: 'users', size: 13 }))
-        : h(ui.Avatar, { name: store.chatTitle(chat), color: bot === undefined ? undefined : bot.color, size: 'sm', image: bot === undefined ? undefined : bot.avatar }),
+        : h(ui.Avatar, { name: store.chatTitle(chat), color: bot === undefined ? undefined : bot.color, size: 'sm', avatar: bot === undefined ? undefined : bot.avatar }),
       h(
         'div',
         { className: 'db-chat-head-main' },
@@ -736,6 +1144,7 @@ function ChatPane(props) {
             }),
       ),
     ),
+    h(ChatActivityBar, { t: t, store: store, chat: chat }),
     h('div', { className: 'db-timeline', ref: scrollRef, onScroll: onScroll }, h('div', { className: 'db-timeline-inner' }, timelineChildren, rows)),
     h(Composer, { key: chat.id, t: t, store: store, chat: chat }),
   )

@@ -10,6 +10,7 @@
 'use strict'
 
 var React = require('react')
+var avatarLib = require('./avatar.js')
 var h = React.createElement
 
 /* --------------------------------------------------------------- hooks */
@@ -82,6 +83,7 @@ var ICONS = {
   quote: ['M6 5.4C4.6 5.4 3.6 6.4 3.6 7.8s1 2.4 2.4 2.4c0 1.6-1 2.7-2.6 3.3', 'M12.4 5.4c-1.4 0-2.4 1-2.4 2.4s1 2.4 2.4 2.4c0 1.6-1 2.7-2.6 3.3'],
   external: ['M9.2 3H13v3.8', 'M13 3L7.4 8.6', 'M11 9.2v3.3A1.5 1.5 0 0 1 9.5 14h-6A1.5 1.5 0 0 1 2 12.5v-6A1.5 1.5 0 0 1 3.5 5h3.3'],
   'chevron-down': ['M4 6.2L8 10l4-3.8'],
+  'chevron-up': ['M4 9.8L8 6l4 3.8'],
   'chevron-left': ['M10 3L5 8l5 5'],
   'chevron-right': ['M6 3l5 5-5 5'],
   check: ['M3 8.4l3.2 3.2L13 5.2'],
@@ -95,6 +97,11 @@ var ICONS = {
   sparkle: ['M8 2l1.5 4.5L14 8l-4.5 1.5L8 14l-1.5-4.5L2 8l4.5-1.5z'],
   inbox: ['M2.4 9.2h3l1 2h3.2l1-2h3', 'M2.4 9.2V4.6A1.6 1.6 0 0 1 4 3h8a1.6 1.6 0 0 1 1.6 1.6v4.6', 'M2.4 9.2v2.4A1.6 1.6 0 0 0 4 13.2h8a1.6 1.6 0 0 0 1.6-1.6V9.2'],
   dot: [{ c: [8, 8, 2.6] }],
+  file: ['M4.5 2h4.7L13 5.8V14H4.5z', 'M9 2v4h4'],
+  image: [{ r: [2, 3.5, 12, 9.5, 1.6] }, 'M2.6 11l3.2-3.4 2.6 2.6 2-2 3 3', { c: [10.8, 6.2, 1] }],
+  download: ['M8 2.5v8', 'M4.6 7.4L8 10.8l3.4-3.4', 'M3 13.2h10'],
+  paperclip: ['M10.8 5.2L5.4 10.6a2.2 2.2 0 0 0 3.1 3.1l5.9-5.9a3.3 3.3 0 0 0-4.7-4.7L4.6 8.2a4.4 4.4 0 0 0 6.2 6.2l4-4'],
+  tasks: [{ r: [3, 2.5, 10, 11, 2] }, 'M5.8 6.2h4.4', 'M5.8 9h3', 'M10.6 11.6l1.4 1.4 2.2-2.6'],
 }
 
 /** One stroke icon drawn in the shell's current text colour. */
@@ -346,6 +353,7 @@ function Tag(props) {
   var className = 'db-tag'
   if (props.tone === 'brand') className += ' is-brand'
   else if (props.tone === 'success') className += ' is-success'
+  else if (props.tone === 'error') className += ' is-error'
   return h(
     'span',
     { className: className, title: props.title },
@@ -356,15 +364,34 @@ function Tag(props) {
 
 /* ------------------------------------------------------------ surfaces */
 
-/** Circular initial avatar tinted with the bot colour. */
+/** Rendered edge in CSS pixels for each avatar size name. */
+var AVATAR_EDGE = { sm: 24, md: 30, lg: 38, xl: 56 }
+
+/**
+ * Bot avatar: a library SVG when the Bot carries one, otherwise the legacy
+ * initial-letter circle tinted with the Bot colour. Every surface (list, chat
+ * bubble, group member picker, form preview) goes through this component so
+ * the fallback is uniform.
+ */
 function Avatar(props) {
   var name = props.name === undefined || props.name === null ? '' : String(props.name)
-  var initial = initialOf(name)
-  var color = typeof props.color === 'string' && /^#[0-9a-fA-F]{6}$/.test(props.color) ? props.color : null
+  var spec = avatarLib.normalizeAvatarValue(props.avatar)
   var className = 'db-avatar'
   if (props.size === 'lg') className += ' is-lg'
   else if (props.size === 'sm') className += ' is-sm'
   else if (props.size === 'xl') className += ' is-xl'
+  var edge = AVATAR_EDGE[props.size] === undefined ? AVATAR_EDGE.md : AVATAR_EDGE[props.size]
+
+  if (spec !== undefined) {
+    return h(
+      'span',
+      { className: className + ' is-svg', title: name, 'aria-hidden': 'true' },
+      avatarLib.renderAvatar(spec, edge),
+    )
+  }
+
+  var initial = initialOf(name)
+  var color = typeof props.color === 'string' && /^#[0-9a-fA-F]{6}$/.test(props.color) ? props.color : null
   var style = color === null ? undefined : { background: color + '2e', color: color, boxShadow: 'inset 0 0 0 1px ' + color + '55' }
   return h(
     'span',

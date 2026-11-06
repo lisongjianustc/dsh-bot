@@ -65,7 +65,7 @@ test('tools: the registered names match the prompt announcement exactly', async 
   const { captured } = make(t)
   assert.deepEqual(captured.map(entry => entry.definition.name), TOOL_NAMES)
   assert.deepEqual(TOOL_NAMES, BOT_TOOL_NAMES)
-  assert.equal(TOOL_NAMES.length, 18)
+  assert.equal(TOOL_NAMES.length, 21)
 })
 
 test('tools: every definition has the bare ToolDefinition shape and a working renderer', async (t) => {
@@ -280,6 +280,41 @@ test('tools: helper tools report a receipt and enforce ownership', async (t) => 
   const stopped = await stop.execute({ helper_id: helper2.id }, { agent: { id: 'session-bob' } })
   assert.equal(stopped.ok, true)
   assert.equal(stopped.helper.status, 'stopped')
+})
+
+test('tools: task tools dispatch, read and cancel through the tool surface', async (t) => {
+  const { captured, services } = make(t)
+  const alice = await services.bots.create({ name: 'Alice' })
+  const bob = await services.bots.create({ name: 'Bob' })
+  const aliceChat = services.chats.findDm(alice.id)
+  await services.chats.setSession(aliceChat.id, alice.id, { sessionId: 'session-alice' })
+  const dispatch = captured.find(entry => entry.definition.name === 'bot_dispatch_tasks').definition
+  const get = captured.find(entry => entry.definition.name === 'bot_get_tasks').definition
+  const cancel = captured.find(entry => entry.definition.name === 'bot_cancel_tasks').definition
+
+  const receipt = await dispatch.execute({ tasks: [{ to: 'Bob', message: 'check the build' }] }, { agent: { id: 'session-alice' } })
+  assert.equal(receipt.ok, true)
+  assert.match(receipt.batchId, /^batch_/)
+  assert.equal(receipt.tasks[0].status, 'queued')
+  assert.ok(receipt.note)
+
+  const polled = await get.execute({ batch_id: receipt.batchId, wait_ms: 1000, result_offset: 0 }, { agent: { id: 'session-alice' } })
+  assert.equal(polled.ok, true)
+  assert.equal(polled.tasks[0].status, 'done')
+  assert.match(polled.tasks[0].result, /answered/)
+  assert.equal(polled.batches[0].status, 'done')
+  const relay = services.messages.list(aliceChat.id).find(message => message.id === `msg_task_${receipt.tasks[0].id}`)
+  assert.ok(relay)
+
+  const cancelled = await cancel.execute({ batch_id: receipt.batchId }, { agent: { id: 'session-alice' } })
+  assert.equal(cancelled.ok, true)
+  assert.deepEqual(cancelled.cancelled, [])
+  assert.deepEqual(cancelled.ignored, [receipt.tasks[0].id])
+
+  const blank = await dispatch.execute({ tasks: [] }, { agent: { id: 'session-alice' } })
+  assert.equal(blank.ok, false)
+  assert.equal(blank.code, 'invalid-request')
+  void bob
 })
 
 test('tools: remember and recall round-trip through the services', async (t) => {

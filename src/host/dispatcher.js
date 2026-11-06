@@ -33,11 +33,24 @@ export const PER_BOT_QUEUE = 4
 /** How long a relay conclusion may be. */
 const CONCLUSION_MAX = 600
 
-/** The text a user-visible message carries. */
+/**
+ * The text a user-visible message carries, plus the attachment manifest.
+ *
+ * The manifest is prompt data only: the panel renders the attachment parts, and
+ * the Bot needs the absolute paths to open them with read/bash/read_image.
+ * @param {object} message - the stored message.
+ * @returns {string} the prompt input text.
+ */
 function textOfMessage(message) {
-  if (typeof message?.text === 'string' && message.text !== '') return message.text
-  const part = message?.parts?.find(candidate => candidate.type === 'text')
-  return typeof part?.text === 'string' ? part.text : ''
+  let text = ''
+  if (typeof message?.text === 'string' && message.text !== '') text = message.text
+  else {
+    const part = message?.parts?.find(candidate => candidate.type === 'text')
+    text = typeof part?.text === 'string' ? part.text : ''
+  }
+  const manifest = typeof message?.attachmentManifest === 'string' ? message.attachmentManifest : ''
+  if (manifest === '') return text
+  return text === '' ? manifest : `${text}\n\n${manifest}`
 }
 
 /** One semaphore over rounds. */

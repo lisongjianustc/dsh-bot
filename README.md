@@ -10,6 +10,9 @@ Create named Bots, chat with them one-on-one, pull them into groups, give them s
 - **Private chats** with a Bot: every message is one real Agent turn.
 - **Group management by the Bot itself**: the main Bot can create, update and delete groups, pick members/admins, and post into any group without joining it (`bot_create_group` / `bot_update_group` / `bot_delete_group` / `bot_post_group`).
 - **Group chats** with `@Name` mentions, admin/all reply modes, `[PASS]` skipping, a hop limit with a wrap-up turn, optional handover of the previous conclusion, and a group note that survives clearing the chat.
+- **Rich input**: attach images and files like the DSH composer (paste, drag, picker); the Bot receives their absolute paths and can read them.
+- **Per-Bot workspace and permission**: pin a Bot to a DSH workspace (new sessions land there) and choose its permission preset.
+- **Avatar library with auto-matching**: 24 built-in programmatic avatars; new Bots get a matching avatar from their name/role keywords, and unknown roles fall back deterministically.
 - **Memory**: one store per Bot plus one shared by the team, selected into the next turn under a 6,000-character budget, guarded by revisions and a journal.
 - **Background jobs**: hidden child sessions for work that should not block the chat; a report is posted back into the conversation and the Bot verifies it in its own words (`bot_start_helper` / `bot_list_helpers` / `bot_stop_helper`).
 - **Automatic tool approval**: a Bot session answers approval requests itself (`autoApprove`, on by default) so background turns never hang; turn it off to review every approval by hand.

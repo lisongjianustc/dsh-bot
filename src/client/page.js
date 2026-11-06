@@ -100,7 +100,7 @@ function ChatRow(props) {
       : h(ui.Avatar, {
           name: title,
           color: bot === undefined ? undefined : bot.color,
-          image: bot === undefined ? undefined : bot.avatar,
+          avatar: bot === undefined ? undefined : bot.avatar,
         }),
     h(
       'span',

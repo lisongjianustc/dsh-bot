@@ -10,6 +10,9 @@ DeepSeek Harness（DSH）Web GUI 与桌面端的 **MiniMax Bot 式常驻 Agent �
 - **私聊**：每发一条消息就是一次真实 Agent 回合，流式渲染。
 - **Bot 自己管群**：主 Bot 可以建群/改群/删群，指定成员与群主，并能向任意群（无需入群）发起讨论（`bot_create_group` / `bot_update_group` / `bot_delete_group` / `bot_post_group`）。
 - **群聊**：`@名字` 指定成员；群主/全体两种回复模式；`[PASS]` 跳过；接力跳数上限 + 收敛回合；可选 handover 传递上一跳结论；group note 跨清空聊天保留。
+- **富输入**：像 DSH 输入框一样附带图片与文件（粘贴/拖拽/选择），Bot 收到绝对路径并可直接读取。
+- **每 Bot 工作区与权限**：把 Bot 钉到某个 DSH workspace（新会话落在该目录）并选择权限档位。
+- **头像库自动匹配**：24 个内置程序化头像；新 Bot 按名字/角色关键词自动匹配，未知角色按哈希稳定兜底。
 - **记忆**：每 Bot 一份 + 团队共享一份；每 turn 按 6000 字预算选择注入；revision 冲突检查 + journal。
 - **后台任务**：隐藏子会话执行，不阻塞聊天；报告回投到会话后由 Bot 用自己的话验收（`bot_start_helper` / `bot_list_helpers` / `bot_stop_helper`）。
 - **自动批准**：Bot 会话自己应答审批请求（`autoApprove`，默认开），后台回合不会挂起；关掉后每次审批都交给人。

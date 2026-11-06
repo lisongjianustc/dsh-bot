@@ -202,6 +202,8 @@ check(store.mode === 'mock', 'state read failure degrades to the demo snapshot')
 check(store.bots().length === 3, 'demo snapshot exposes three bots')
 check(store.chats().length === 4, 'demo snapshot exposes four chats')
 check(store.selectedChatId === 'chat_b7a1c9d3e5f2', 'pinned Chief chat is selected by default')
+check(store.workspaces().length === 2, 'demo snapshot offers workspaces for the Bot form')
+check(store.tasks().length === 4 && store.helpers().length === 1, 'demo snapshot offers tasks and helpers')
 check(store.mode === 'mock' && document.head.children.length === 1, 'stylesheet is installed once through ctx.effect')
 check(document.head.children[0].attributes['data-dsh-bot'] === '', 'stylesheet carries data-dsh-bot')
 
@@ -222,12 +224,28 @@ check(html.includes('db-chat-head'), 'workspace renders the selected chat header
 check(html.includes('db-composer'), 'workspace renders the composer')
 check(!html.includes('[PASS]'), 'pass messages are hidden from the timeline')
 
-for (const tab of ['general', 'bots', 'groups', 'memory', 'schedules', 'usage']) {
+for (const tab of ['general', 'bots', 'groups', 'tasks', 'memory', 'schedules', 'usage']) {
   store.openDrawer(tab)
   await sleep(90)
   const tabHtml = render(mainReg.component, face)
   check(tabHtml.includes('db-drawer'), 'drawer renders for tab "' + tab + '"')
 }
+store.closeDrawer()
+
+// M3: library avatars render as SVG, the tasks tab groups tasks/helpers, and
+// the composer exposes the attachment entry point.
+check(html.includes('db-avatar-svg'), 'bot rosters render library avatars as SVG')
+check((html.match(/db-avatar-svg/g) || []).length >= 3, 'every demo bot gets an avatar')
+check(html.includes('添加附件') || html.includes('db-input'), 'composer is present with its attachment entry point')
+
+store.openDrawer('tasks')
+await sleep(90)
+const tasksHtml = render(mainReg.component, face)
+check(tasksHtml.includes('进行中') && tasksHtml.includes('排队中'), 'tasks tab groups active and queued work')
+check(tasksHtml.includes('已完成') && tasksHtml.includes('失败'), 'tasks tab groups done and failed work')
+check(tasksHtml.includes('db-task'), 'tasks tab renders task rows')
+check(tasksHtml.includes('后台助手') || tasksHtml.includes('助手'), 'tasks tab includes background helpers')
+check(tasksHtml.includes('取消'), 'tasks tab offers cancelling a chat-backed task')
 store.closeDrawer()
 
 // M2: group note view + clear, bot auto-approve tag, schedules/native status,
@@ -261,11 +279,26 @@ if (errorChat !== undefined) {
   check(errorHtml.includes('db-btn'), 'errored message offers a retry control')
 }
 
+// Attachment upload + send in demo mode: the pending bubble shows the card
+// immediately and the demo reply acknowledges the attachment count.
+const attachmentChat = store.chats().find((conversation) => conversation.kind === 'dm')
+store.selectChat(attachmentChat.id)
+const uploaded = await store.uploadAttachment({ name: 'diagram.png', size: 2048, type: 'image/png' })
+check(uploaded !== undefined && uploaded.id.startsWith('att_'), 'uploadAttachment returns an attachment view in demo mode')
+const attachmentSend = store.send(attachmentChat.id, '', [uploaded])
+await sleep(160)
+const attachHtml = render(mainReg.component, face)
+check(attachHtml.includes('db-attach-image'), 'attachment-only send shows an image card immediately')
+check(attachHtml.includes('diagram.png'), 'the attachment card carries the file name')
+await attachmentSend
+await sleep(1800)
+
 const groupChat = store.chats().find((conversation) => conversation.kind === 'group')
 store.selectChat(groupChat.id)
 html = render(mainReg.component, face)
 check(html.includes('db-chat-head'), 'group chat renders its header')
 check(html.includes('架构师'), 'group timeline shows the speaking bot name')
+check(html.includes('db-activity'), 'running background helpers show a bar above the group timeline')
 check(!html.includes('[PASS]'), 'group timeline hides the [PASS] turn')
 
 /* ------------------------------------------------------- demo actions */
@@ -283,13 +316,19 @@ const botReply = list.find((message) => message.role === 'bot' && message.status
 check(botReply !== undefined && botReply.text.length > 10, 'demo reply finishes with streamed text')
 
 const botsBefore = store.bots().length
-await store.createBot({ name: '冒烟测试', role: '临时', autoApprove: false })
+await store.createBot({
+  name: '冒烟测试',
+  role: '临时',
+  autoApprove: false,
+  avatar: { kind: 'library', id: 'custom', motif: 'mystery', color: '#123456', background: '#ffffff' },
+})
 check(store.bots().length === botsBefore + 1, 'createBot adds a bot in demo mode')
 check(store.bots().find((bot) => bot.name === '冒烟测试').autoApprove === false, 'createBot keeps the autoApprove flag')
 store.openDrawer('bots')
 await sleep(80)
 const botsHtml = render(mainReg.component, face)
 check(botsHtml.includes('自动批准'), 'bots list shows the auto-approve tag')
+check(botsHtml.includes('#123456'), 'an unknown avatar motif still renders through the fallback glyph')
 store.closeDrawer()
 const created = store.bots().find((bot) => bot.name === '冒烟测试')
 check(created !== undefined && store.chats().some((conversation) => conversation.botId === created.id), 'createBot adds its DM chat')
@@ -437,6 +476,27 @@ const liveState = {
   running: [],
   settings: { userName: '林', language: 'zh' },
   limits: { maxHops: 6, memoryEntryMax: 6000, memoryStorageMax: 64000, groupNoteMax: 4000 },
+  workspaces: [
+    { id: 'ws_live_1', title: 'dsh-bot workspace', path: '/tmp/dsh-bot' },
+    { id: 'ws_live_2', title: 'Product', path: '/tmp/product' },
+  ],
+  tasks: [
+    {
+      id: 'task_live_1',
+      kind: 'bot',
+      botId: 'bot_aaaaaaaaaaaa',
+      text: '总结 DSH',
+      title: '总结 DSH',
+      status: 'done',
+      result: 'DSH 是一个运行框架。',
+      batchId: 'batch_live',
+      createdAt: 5,
+      endedAt: 6,
+    },
+  ],
+  helpers: [
+    { id: 'helper_live_1', botId: 'bot_bbbbbbbbbbbb', chatId: 'chat_111111111111', title: '调研', task: '调研群聊', status: 'running', createdAt: 7, startedAt: 8 },
+  ],
   schedules: [
     {
       id: 'sch_live_1',
@@ -529,6 +589,9 @@ globalThis.fetch = (url, init = {}) => {
     body = undefined
   }
   fetchCalls.push({ path, method, body })
+  if (path.includes('/upload')) {
+    return jsonResponse({ ok: true, attachment: { id: 'att_live_1', name: 'live.png', size: 64, mime: 'image/png', url: 'dsh-bot/api/media?id=att_live_1' } })
+  }
   if (method === 'GET' && path.includes('/state')) return jsonResponse({ ok: true, state: liveState })
   if (method === 'GET' && path.includes('/messages')) {
     const chatId = new URL('http://x/' + path).searchParams.get('chatId')
@@ -668,6 +731,13 @@ check(store.schedules.list.length === 1, 'deleteSchedule removes it from the Hos
 check(store.schedules.list.some((schedule) => schedule.id === 'sch_live_1'), 'the remaining schedule survives the delete')
 store.closeDrawer()
 
+const liveUpload = await store.uploadAttachment({ name: 'live.png', size: 64, type: 'image/png' })
+check(liveUpload.id === 'att_live_1', 'uploadAttachment posts to the upload route')
+const liveAttachmentMessage = await store.send('chat_111111111111', '请看图', [liveUpload])
+const attachmentCall = fetchCalls.filter((call) => call.path.includes('/chat') && call.body !== undefined && Array.isArray(call.body.attachments)).pop()
+check(attachmentCall !== undefined && attachmentCall.body.attachments[0] === 'att_live_1', 'chat send carries the attachment ids')
+check(store.messagesOf('chat_111111111111').list.some((message) => Array.isArray(message.parts) && message.parts.some((part) => part.type === 'image')), 'the optimistic message keeps the image part')
+
 const liveGroupResult = await store.clearGroupNote('grp_live')
 check(liveGroupResult.cleared === false, 'clearGroupNote reports when the Host ignores noteEntries')
 check(store.groupById('grp_live').noteEntries.length === 1, 'an unsupported note clear leaves the note untouched')
@@ -681,6 +751,15 @@ const liveUpdate = await store.updateSchedule('sch_live_1', {
 check(liveUpdate.replaced === true, 'schedule editing falls back to create+delete when update is refused')
 check(store.schedules.list.some((schedule) => schedule.title === '线上晨报（改）'), 'the replacement schedule is in the list')
 check(!store.schedules.list.some((schedule) => schedule.id === 'sch_live_1'), 'the replaced schedule is gone')
+check(store.workspaces().length === 2, 'workspaces are read from the state snapshot')
+check(store.tasks().length === 1 && store.tasks()[0].result.length > 0, 'tasks are read from the state snapshot')
+check(store.helpers().length === 1, 'helpers are read from the state snapshot')
+store.openDrawer('tasks')
+await sleep(90)
+const liveTasksHtml = render(mainReg.component, face)
+check(liveTasksHtml.includes('总结 DSH') && liveTasksHtml.includes('DSH 是一个运行框架。'), 'tasks tab renders a real TaskView result')
+check(liveTasksHtml.includes('调研') && liveTasksHtml.includes('后台助手'), 'tasks tab renders real helpers')
+store.closeDrawer()
 store.openDrawer('schedules')
 await sleep(90)
 const schedulesHtml = render(mainReg.component, face)

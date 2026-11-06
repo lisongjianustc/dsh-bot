@@ -99,7 +99,8 @@ function buildDemoState() {
     instructions: '你是团队的总管，负责拆解目标、分派任务并在群聊里做最后的收敛。回答简洁、先给结论。',
     skin: 'chief',
     color: DEMO_COLORS[0],
-    avatar: '',
+    avatar: { kind: 'library', id: 'lead-crown', motif: 'crown', color: '#3b6df6', background: '#eaf0ff' },
+    avatarAuto: true,
     isMain: true,
     model: null,
     permission: 'workspace-write',
@@ -115,7 +116,9 @@ function buildDemoState() {
     instructions: '你负责架构评审：先画清楚边界，再指出风险，最后给出最小可行方案。',
     skin: 'architect',
     color: DEMO_COLORS[1],
-    avatar: '',
+    avatar: { kind: 'library', id: 'engineer-wrench', motif: 'wrench', color: '#f08a24', background: '#fdf0e2' },
+    avatarAuto: true,
+    workspaceId: 'ws_demo_product',
     isMain: false,
     model: { provider: 'deepseek', model: 'deepseek-reasoner', reasoningEffort: 'high' },
     permission: 'read-only',
@@ -131,7 +134,8 @@ function buildDemoState() {
     instructions: '你负责把技术内容写成清楚、克制、有信息量的中文文档。',
     skin: 'writer',
     color: DEMO_COLORS[2],
-    avatar: '',
+    avatar: { kind: 'library', id: 'writer-quill', motif: 'quill', color: '#7b5cf0', background: '#efeaff' },
+    avatarAuto: true,
     isMain: false,
     model: null,
     permission: 'workspace-write',
@@ -233,6 +237,67 @@ function buildDemoState() {
       default: { provider: 'deepseek', model: 'deepseek-chat' },
     },
     limits: { maxHops: 6, memoryEntryMax: 6000, memoryStorageMax: 64000, groupNoteMax: 4000 },
+    workspaces: [
+      { id: 'ws_demo_default', title: '默认 dsh-bot 工作区', path: '~/.dsh/dsh-bot/workspace' },
+      { id: 'ws_demo_product', title: '产品项目', path: '~/Project/product' },
+    ],
+    tasks: [
+      {
+        id: 'task_demo1',
+        kind: 'bot',
+        botId: 'bot_8b21e6a4c9d0',
+        text: '评审 dsh-bot 的客户端结构',
+        title: '评审客户端结构',
+        status: 'running',
+        createdAt: Date.now() - 300000,
+        startedAt: Date.now() - 240000,
+      },
+      {
+        id: 'task_demo2',
+        kind: 'discussion',
+        groupId: 'grp_4a2e9c7b1d6f',
+        text: '讨论群聊接力策略',
+        title: '讨论群聊接力',
+        status: 'queued',
+        batchId: 'batch_demo',
+        createdAt: Date.now() - 120000,
+      },
+      {
+        id: 'task_demo3',
+        kind: 'bot',
+        botId: 'bot_5f3a91c2d7e4',
+        text: '整理今天的计划',
+        title: '整理今日计划',
+        status: 'done',
+        result: '先给结论：今天只做三件事…',
+        createdAt: Date.now() - 3600000,
+        startedAt: Date.now() - 3500000,
+        endedAt: Date.now() - 3000000,
+      },
+      {
+        id: 'task_demo4',
+        kind: 'bot',
+        botId: 'bot_1c7d4f9a2b35',
+        text: '写一段产品介绍',
+        title: '产品介绍初稿',
+        status: 'failed',
+        error: 'model-unavailable: 所选模型不可用',
+        createdAt: Date.now() - 7200000,
+        endedAt: Date.now() - 7100000,
+      },
+    ],
+    helpers: [
+      {
+        id: 'helper_demo1',
+        botId: 'bot_8b21e6a4c9d0',
+        chatId: 'chat_6f0b2d4a8c3e',
+        title: '调研群聊接力',
+        task: '阅读群聊接力相关源码并总结',
+        status: 'running',
+        createdAt: Date.now() - 200000,
+        startedAt: Date.now() - 190000,
+      },
+    ],
     usage: null,
   }
 }
@@ -281,6 +346,22 @@ function buildDemoMessages(state) {
     msg('chat_b7a1c9d3e5f2', 4, 'bot', '拆好了：\n\n① 页面挂在 sidebar.panellist + main 上，切面板不丢状态\n② state 拉取 + SSE 增量\n③ 断开时降级到演示数据并显示横幅\n\n每一步都能在 GUI 里单独验收。', 'done', {
       botId: chief.id,
       sessionId: 'sess_demo_chief',
+    }),
+    msg('chat_b7a1c9d3e5f2', 5, 'bot', '', 'done', {
+      botId: chief.id,
+      sessionId: 'sess_demo_chief',
+      text: '这是一张架构草图，附一份协议笔记：',
+      parts: [
+        { type: 'text', text: '这是一张架构草图，附一份协议笔记：' },
+        {
+          type: 'image',
+          attachment: { id: 'att_demo_img', name: 'architecture.png', size: 184320, mime: 'image/png', url: 'dsh-bot/api/media?id=att_demo_img' },
+        },
+        {
+          type: 'file',
+          attachment: { id: 'att_demo_file', name: 'protocol-notes.md', size: 5120, mime: 'text/markdown', url: 'dsh-bot/api/media?id=att_demo_file' },
+        },
+      ],
     }),
   ]
   out['chat_2e6c8a4f0b1d'] = [
@@ -528,6 +609,18 @@ function createStore() {
     return store.data === null ? [] : arrayOf(store.data.running)
   }
 
+  function workspaces() {
+    return store.data === null ? [] : arrayOf(store.data.workspaces)
+  }
+
+  function tasks() {
+    return store.data === null ? [] : arrayOf(store.data.tasks)
+  }
+
+  function helpers() {
+    return store.data === null ? [] : arrayOf(store.data.helpers)
+  }
+
   function botById(id) {
     var all = bots()
     for (var i = 0; i < all.length; i += 1) if (all[i] !== null && all[i].id === id) return all[i]
@@ -607,6 +700,9 @@ function createStore() {
         noticeMax: numberOr(limits.noticeMax, 4000),
       },
       schedules: Array.isArray(source.schedules) ? source.schedules : undefined,
+      workspaces: arrayOf(source.workspaces),
+      tasks: arrayOf(source.tasks),
+      helpers: arrayOf(source.helpers),
     }
   }
 
@@ -1148,7 +1244,8 @@ function createStore() {
     })
   }
 
-  function mockSend(chat, text) {
+  function mockSend(chat, text, attachments) {
+    var attachmentCount = Array.isArray(attachments) ? attachments.length : 0
     var localIndex = -1
     var entry = messagesOf(chat.id)
     for (var i = entry.list.length - 1; i >= 0; i -= 1) {
@@ -1181,9 +1278,11 @@ function createStore() {
       }
     } else {
       var bot = botById(chat.botId) || bots()[0]
+      var reply = demoReplyFor(bot, text)
+      if (attachmentCount > 0) reply = '收到你发的 ' + attachmentCount + ' 个附件，我看过了。\n\n' + reply
       sequence.push({
         bot: bot,
-        text: demoReplyFor(bot, text),
+        text: reply,
         toolNames: bot !== undefined && bot.isMain ? ['read_workspace'] : [],
       })
     }
@@ -1328,14 +1427,47 @@ function createStore() {
 
   /* --------------------------------------------------------------- actions */
 
-  function send(chatId, rawText) {
+  /**
+   * Upload one file for the composer. The demo snapshot fakes a local
+   * attachment so the attach flow is usable without a Host.
+   * @param file File/Blob with a name and type.
+   * @returns Promise<AttachmentView>
+   */
+  function uploadAttachment(file) {
+    if (file === undefined || file === null) return Promise.reject(new Error('invalid-request'))
+    var name = String(file.name === undefined ? 'file' : file.name)
+    if (store.mode === 'mock') {
+      return new Promise(function (resolve) {
+        setTimeout(function () {
+          resolve({
+            id: makeId('att'),
+            name: name,
+            size: numberOr(file.size, 0),
+            mime: typeof file.type === 'string' ? file.type : 'application/octet-stream',
+            url: 'dsh-bot/api/media?id=' + makeId('att'),
+          })
+        }, 160)
+      })
+    }
+    return transport.uploadFile(name, file, typeof file.type === 'string' ? file.type : '')
+  }
+
+  function send(chatId, rawText, attachments) {
     var text = typeof rawText === 'string' ? rawText : ''
-    if (text.trim() === '') return Promise.resolve()
+    var attachmentViews = Array.isArray(attachments) ? attachments : []
+    if (text.trim() === '' && attachmentViews.length === 0) return Promise.resolve()
     var chat = chatById(chatId)
     if (chat === undefined) {
       return Promise.reject(new Error('chat-not-found'))
     }
     var clientMessageId = 'cid_' + rid()
+    var localParts = []
+    if (text !== '') localParts.push({ type: 'text', text: text })
+    for (var a = 0; a < attachmentViews.length; a += 1) {
+      var view = attachmentViews[a]
+      var mime = String(view.mime === undefined ? '' : view.mime)
+      localParts.push({ type: mime.indexOf('image/') === 0 ? 'image' : 'file', attachment: view })
+    }
     var local = {
       id: makeId('msg'),
       chatId: chatId,
@@ -1344,24 +1476,31 @@ function createStore() {
       role: 'user',
       text: text,
       status: 'pending',
-      parts: [{ type: 'text', text: text }],
+      parts: localParts,
       clientMessageId: clientMessageId,
     }
+    if (attachmentViews.length > 0) local.attachments = attachmentViews
     upsertMessage(local)
     store.drafts[chatId] = ''
     delete store.quotes[chatId]
     notify()
 
     if (store.mode === 'mock') {
-      return mockSend({ id: chat.id, kind: chat.kind, botId: chat.botId, groupId: chat.groupId }, text)
+      return mockSend({ id: chat.id, kind: chat.kind, botId: chat.botId, groupId: chat.groupId }, text, attachmentViews)
     }
 
-    return transport.post('chat', {
+    var requestBody = {
       action: CHAT_ACTION_SEND,
       chatId: chatId,
       text: text,
       clientMessageId: clientMessageId,
-    }).then(
+    }
+    if (attachmentViews.length > 0) {
+      requestBody.attachments = attachmentViews.map(function (view) {
+        return view.id
+      })
+    }
+    return transport.post('chat', requestBody).then(
       function (body) {
         if (body !== null && typeof body === 'object') {
           if (body.state !== undefined) applyState(body.state)
@@ -2070,6 +2209,9 @@ function createStore() {
   store.groups = groups
   store.chats = chats
   store.running = running
+  store.workspaces = workspaces
+  store.tasks = tasks
+  store.helpers = helpers
   store.botById = botById
   store.groupById = groupById
   store.chatById = chatById
@@ -2093,6 +2235,7 @@ function createStore() {
   store.setQuote = setQuote
   store.quoteOf = quoteOf
   store.send = send
+  store.uploadAttachment = uploadAttachment
   store.cancel = cancel
   store.retryChat = retryChat
   store.markRead = markRead

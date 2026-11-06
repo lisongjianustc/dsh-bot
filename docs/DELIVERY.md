@@ -96,6 +96,30 @@
 
 **与 MiniMax Bot 21 工具的差距（剩余 3 个）**：`dispatch_tasks`（批量派单，1..32 条，带 request_id 幂等）、`get_tasks`（按 task/batch 查询，支持 wait_ms 与结果分页）、`cancel_tasks`（取消任务/批次及依赖）。这三个属于"任务调度器 + 依赖图 + 回执幂等"能力，建议作为下一阶段（M4）实现，其余 18 个已对齐。
 
+### 1.12 v0.3.0：对齐 MiniMax Bot 全量工具 + 附件/工作区/头像库/任务（2026-11-06 21:3x）
+
+**工具面 21/21**：`bot_dispatch_tasks` / `bot_get_tasks` / `bot_cancel_tasks` 补齐（立即回执、后台执行、`request_id`+fingerprint 幂等、结果 relay 幂等、取消级联、重启 running→unknown）。全部 `bot_*` 裸 ToolDefinition，一次定死。
+
+**附件输入（对齐 DSH 对话框）**
+- `POST /api/upload`（≤25MiB、sha1 内容寻址去重、原子写）+ `GET /api/media`（inline/attachment、nosniff、路径限定 uploads）；
+- `chat send attachments:[]`（≤8）→ 消息 `parts` 前插 `image`/`file`，并生成给 Bot 的绝对路径清单（DM 与群快照）。
+- 真实验收：上传 PNG/TXT → 消息 image/file parts；Chief 读到 `note.txt` 内容并给出 `/Users/…/.dsh/dsh-bot/uploads/4394773f5e97-note.txt`；`/media` 返回正确 content-type。客户端：composer「+」→ 图片/文件、粘贴、拖拽、chips、25MB/8 个上限、发送时乐观渲染；历史 image/file 卡片（点击打开/下载）；有效 PNG 上传下载 SHA-256 一致。
+
+**每 Bot 工作区 + 权限**
+- 新字段 `bot.workspaceId`（StateView 增加 `workspaces[]`，真机 20 个）；只影响之后新建会话；未知 workspace → `workspace-unavailable`。
+- 验收：Bot 选 `DeepSeekHarnessPlugin` 后首条消息的会话落在 `~/.dsh/sessions/--Users-lisongjian-Project-DeepSeekHarness--/session-6fa3e655…`。权限沿用每 Bot 三档。
+- 客户端：Bot 表单工作区下拉 + 变更提示；权限/模型/思考档位/自动批准/后台助手同屏。
+
+**头像库（自动匹配，不局限角色）**
+- `src/host/avatars.js`：24 预设 + default 兜底；评分「最长关键词 → 命中数 → 表序」；未知角色按 `sha1(name+role)` 稳定取非兜底预设；`isMain` 无命中优先皇冠；显式指定优先；旧 Bot 自动补 spec 并落盘。
+- 验收：`数据猫/数据分析 → data-chart`、`市场增长/市场运营 → ops-megaphone`；历史 Chief→lead-crown、Alice→research-flask、Bob→engineer-wrench 全部自动补齐。
+- 客户端 `src/client/avatar.js`：24 预设程序化 SVG（头/眼/天线/耳 + motif 徽章），与 Host 关键词表逐字段同步、9 组身份匹配结果 100% 一致；「换一个」/25 宫格/「自动匹配」；列表/气泡/群成员/表单统一渲染。
+
+**任务面板**：设置抽屉新增「任务」tab（真实数据：2 个 batch 任务 + 1 个后台助手，分组/目标/结果展开/batch 标签）；聊天上方运行条。
+
+**验收数字**：Host 单测 **143/143**；Client build `11 modules -> lib/client.js (372,135 bytes)`、smoke **137 项全过**；真实 Host `verify-live.mjs` **7/7**。
+**截图**：`docs/screenshots/{chat-attachments-tools,composer-attachments,settings-bots-avatars,settings-tasks}.png`。
+
 ## 3. 安装与验收步骤
 
 ### 3.1 全新安装

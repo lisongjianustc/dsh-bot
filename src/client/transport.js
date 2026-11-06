@@ -167,6 +167,74 @@ function post(path, body, timeoutMs) {
   return sendRequest('POST', path, undefined, body === undefined ? {} : body, timeoutMs)
 }
 
+/** Upload budget: a 25 MiB local write may take a moment, but never forever. */
+var UPLOAD_TIMEOUT_MS = 90000
+
+/**
+ * Upload one file's raw bytes and resolve the Host's attachment view.
+ * @param name file name (sent as `?name=`).
+ * @param body Blob/File/ArrayBuffer of the file bytes.
+ * @param mime content type, when known.
+ */
+function uploadFile(name, body, mime) {
+  var url = apiUrl('upload', { name: name })
+  var controller = typeof AbortController === 'function' ? new AbortController() : undefined
+  var timer
+  if (controller !== undefined) {
+    timer = setTimeout(function () {
+      try {
+        controller.abort()
+      } catch (error) {
+        /* already aborted */
+      }
+    }, UPLOAD_TIMEOUT_MS)
+  }
+  var headers = { accept: 'application/json' }
+  if (typeof mime === 'string' && mime !== '') headers['content-type'] = mime
+  var init = { method: 'POST', headers: headers, credentials: 'same-origin', body: body }
+  if (controller !== undefined) init.signal = controller.signal
+  return fetch(url, init).then(
+    function (response) {
+      return response.text().then(function (text) {
+        if (timer !== undefined) clearTimeout(timer)
+        var parsed
+        var parseFailed = false
+        try {
+          parsed = text === '' ? undefined : JSON.parse(text)
+        } catch (error) {
+          parseFailed = true
+        }
+        if (!response.ok) {
+          var code = hostCode(parsed)
+          var detail = hostMessage(parsed) || String(response.status)
+          if (code !== undefined) throw new DshBotApiError('rejected', detail, response.status, code)
+          if (response.status === 401) throw new DshBotApiError('unauthorized', detail, response.status)
+          if (response.status === 403) throw new DshBotApiError('forbidden', detail, response.status)
+          if (response.status === 404) throw new DshBotApiError('not-mounted', detail, response.status)
+          throw new DshBotApiError('rejected', detail, response.status)
+        }
+        if (parseFailed || parsed === undefined || parsed === null || typeof parsed !== 'object') {
+          throw new DshBotApiError('unexpected', String(response.status), response.status)
+        }
+        if (parsed.ok === false) {
+          throw new DshBotApiError('rejected', hostMessage(parsed), response.status, hostCode(parsed))
+        }
+        if (parsed.attachment === undefined || parsed.attachment === null) {
+          throw new DshBotApiError('unexpected', String(response.status), response.status)
+        }
+        return parsed.attachment
+      })
+    },
+    function (error) {
+      if (timer !== undefined) clearTimeout(timer)
+      if (error instanceof DshBotApiError) throw error
+      var aborted = error !== null && error !== undefined && error.name === 'AbortError'
+      if (aborted) throw new DshBotApiError('timeout', 'timeout')
+      throw new DshBotApiError('unreachable', error === undefined ? '' : String(error && error.message ? error.message : error))
+    },
+  )
+}
+
 /** Map a Host code to its locale key, or undefined when it has no dedicated copy. */
 function codeKey(code) {
   return HOST_CODE_KEYS[code]
@@ -319,10 +387,12 @@ function connectEvents(options) {
 module.exports = {
   API_PREFIX: API_PREFIX,
   REQUEST_TIMEOUT_MS: REQUEST_TIMEOUT_MS,
+  UPLOAD_TIMEOUT_MS: UPLOAD_TIMEOUT_MS,
   DshBotApiError: DshBotApiError,
   apiUrl: apiUrl,
   get: get,
   post: post,
+  uploadFile: uploadFile,
   describeError: describeError,
   connectEvents: connectEvents,
 }

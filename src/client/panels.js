@@ -13,6 +13,7 @@
 var React = require('react')
 var ui = require('./ui.js')
 var transport = require('./transport.js')
+var avatarLib = require('./avatar.js')
 
 var h = ui.h
 var useStoreVersion = ui.useStoreVersion
@@ -163,6 +164,7 @@ function SettingsDrawer(props) {
     { id: 'general', label: t('tab.general'), icon: 'settings' },
     { id: 'bots', label: t('tab.bots'), icon: 'bot' },
     { id: 'groups', label: t('tab.groups'), icon: 'users' },
+    { id: 'tasks', label: t('tab.tasks'), icon: 'tasks' },
     { id: 'memory', label: t('tab.memory'), icon: 'memory' },
     { id: 'schedules', label: t('tab.schedules'), icon: 'clock' },
     { id: 'usage', label: t('tab.usage'), icon: 'chart' },
@@ -171,6 +173,7 @@ function SettingsDrawer(props) {
   if (tab === 'general') body = h(GeneralTab, { t: t, store: store })
   else if (tab === 'bots') body = h(BotsTab, { t: t, store: store })
   else if (tab === 'groups') body = h(GroupsTab, { t: t, store: store })
+  else if (tab === 'tasks') body = h(TasksTab, { t: t, store: store })
   else if (tab === 'memory') body = h(MemoryTab, { t: t, store: store })
   else if (tab === 'schedules') body = h(SchedulesTab, { t: t, store: store })
   else body = h(UsageTab, { t: t, store: store })
@@ -399,7 +402,7 @@ function BotsTab(props) {
             h(
               'div',
               { className: 'db-card-head' },
-              h(ui.Avatar, { name: bot.name, color: bot.color, image: bot.avatar, size: 'lg' }),
+              h(ui.Avatar, { name: bot.name, color: bot.color, avatar: bot.avatar, size: 'lg' }),
               h(
                 'div',
                 { className: 'db-card-main' },
@@ -459,6 +462,19 @@ function BotForm(props) {
   var pairPermission = React.useState(isNew ? 'workspace-write' : String(bot.permission))
   var permission = pairPermission[0]
   var setPermission = pairPermission[1]
+  var pairWorkspace = React.useState(
+    isNew ? '' : String(bot.workspaceId === undefined || bot.workspaceId === null ? '' : bot.workspaceId),
+  )
+  var workspaceId = pairWorkspace[0]
+  var setWorkspaceId = pairWorkspace[1]
+  var initialAvatarId =
+    isNew || bot.avatar === undefined || bot.avatar === null || typeof bot.avatar.id !== 'string' ? null : bot.avatar.id
+  var pairAvatarId = React.useState(initialAvatarId)
+  var avatarId = pairAvatarId[0]
+  var setAvatarId = pairAvatarId[1]
+  var pairAvatarGrid = React.useState(false)
+  var avatarGridOpen = pairAvatarGrid[0]
+  var setAvatarGridOpen = pairAvatarGrid[1]
   var pairColor = React.useState(isNew ? PALETTE[0] : String(bot.color === undefined ? PALETTE[0] : bot.color))
   var color = pairColor[0]
   var setColor = pairColor[1]
@@ -495,10 +511,23 @@ function BotForm(props) {
     if (models[i].value === modelValue) selected = models[i]
   }
   var efforts = selected === null ? [] : selected.efforts
+  var workspaceOptions = store.workspaces()
   var defaults = store.data !== null && store.data.models !== undefined && store.data.models !== null ? store.data.models.default : undefined
   var inheritLabel = t('bots.form.modelInherit')
   if (defaults !== undefined && defaults !== null && defaults.provider !== undefined) {
     inheritLabel += ' (' + String(defaults.provider) + '/' + String(defaults.model) + ')'
+  }
+
+  var identity = { name: name.trim(), role: role.trim(), instructions: instructions, isMain: isNew ? false : bot.isMain === true }
+  var previewAvatar = avatarId === null ? avatarLib.matchAvatar(identity) : avatarLib.avatarById(avatarId)
+
+  function cycleAvatar() {
+    var current = -1
+    for (var i = 0; i < avatarLib.PRESETS.length; i += 1) {
+      if (avatarLib.PRESETS[i].id === avatarId) current = i
+    }
+    var next = (current + 1) % avatarLib.PRESETS.length
+    setAvatarId(avatarLib.PRESETS[next].id)
   }
 
   function submit() {
@@ -516,6 +545,11 @@ function BotForm(props) {
       autoHelper: autoHelper,
       // New field: a Host that knows it uses the flag; an older Host ignores it.
       autoApprove: autoApprove,
+      // Empty string explicitly clears the pin; an id pins a real workspace.
+      workspaceId: workspaceId,
+      // null asks the Host to auto-match from the identity; an id pins a preset.
+      avatar: avatarId === null ? null : { kind: 'library', id: avatarId },
+      autoAvatar: avatarId === null,
     }
     if (!isNew && bot.skin !== undefined) payload.skin = bot.skin
     setSaving(true)
@@ -621,11 +655,72 @@ function BotForm(props) {
       ),
     }),
     h(ui.Field, {
+      label: t('bots.form.avatar'),
+      hint: avatarId === null ? t('bots.form.avatarAutoHint') : t('bots.form.avatarGrid'),
+      children: h(
+        'div',
+        { className: 'db-avatar-field' },
+        h(ui.Avatar, { name: name.trim() === '' ? '?' : name, color: color, avatar: previewAvatar, size: 'xl' }),
+        h(
+          'div',
+          { className: 'db-avatar-actions' },
+          avatarId === null ? h(ui.Tag, { tone: 'brand' }, t('bots.form.avatarAutoOn')) : null,
+          h(ui.Button, { size: 'sm', icon: 'refresh', onClick: cycleAvatar }, t('bots.form.avatarChange')),
+          h(ui.Button, { size: 'sm', icon: 'sparkle', onClick: function () { setAvatarId(null) } }, t('bots.form.avatarAuto')),
+          h(ui.Button, {
+            size: 'sm',
+            icon: 'chevron-down',
+            onClick: function () {
+              setAvatarGridOpen(!avatarGridOpen)
+            },
+          }, t('bots.form.avatarMore')),
+        ),
+      ),
+    }),
+    avatarGridOpen
+      ? h(
+          'div',
+          { className: 'db-avatar-grid' },
+          avatarLib.PRESETS.map(function (preset) {
+            var spec = avatarLib.avatarById(preset.id)
+            return h(
+              'button',
+              {
+                key: preset.id,
+                type: 'button',
+                title: preset.intent + ' · ' + preset.id,
+                className: 'db-avatar-choice' + (avatarId === preset.id ? ' is-active' : ''),
+                onClick: function () {
+                  setAvatarId(preset.id)
+                  setAvatarGridOpen(false)
+                },
+              },
+              h(ui.Avatar, { name: preset.id, avatar: spec, size: 'lg' }),
+              h('span', { className: 'db-avatar-choice-label' }, preset.intent),
+            )
+          }),
+        )
+      : null,
+    h(ui.Field, {
+      label: t('bots.form.workspace'),
+      hint: t('bots.form.workspaceHint'),
+      children: workspaceOptions.length === 0
+        ? h('div', { className: 'db-inline-note' }, t('bots.form.workspaceEmpty'))
+        : h(
+            ui.Select,
+            { value: workspaceId, onChange: setWorkspaceId },
+            h('option', { value: '' }, t('bots.form.workspaceDefault')),
+            workspaceOptions.map(function (workspace) {
+              return h('option', { key: workspace.id, value: workspace.id }, String(workspace.title === undefined ? workspace.id : workspace.title) + (workspace.path === undefined ? '' : ' · ' + workspace.path))
+            }),
+          ),
+    }),
+    h(ui.Field, {
       label: t('bots.form.color'),
       children: h(
         'div',
         { className: 'db-color-field' },
-        h(ui.Avatar, { name: name.trim() === '' ? '?' : name, color: color, size: 'xl' }),
+        h(ui.Avatar, { name: name.trim() === '' ? '?' : name, color: color, avatar: avatarId === null ? undefined : previewAvatar, size: 'xl' }),
         h(
           'div',
           { className: 'db-swatches' },
@@ -907,6 +1002,18 @@ function GroupForm(props) {
     }
   }
 
+  var identity = { name: name.trim(), role: role.trim(), instructions: instructions, isMain: isNew ? false : bot.isMain === true }
+  var previewAvatar = avatarId === null ? avatarLib.matchAvatar(identity) : avatarLib.avatarById(avatarId)
+
+  function cycleAvatar() {
+    var current = -1
+    for (var i = 0; i < avatarLib.PRESETS.length; i += 1) {
+      if (avatarLib.PRESETS[i].id === avatarId) current = i
+    }
+    var next = (current + 1) % avatarLib.PRESETS.length
+    setAvatarId(avatarLib.PRESETS[next].id)
+  }
+
   function submit() {
     if (name.trim() === '') {
       setError(t('bots.form.nameRequired'))
@@ -1014,7 +1121,7 @@ function GroupForm(props) {
                 toggleMember(bot.id, event.target.checked)
               },
             }),
-            h(ui.Avatar, { name: bot.name, color: bot.color, size: 'sm' }),
+            h(ui.Avatar, { name: bot.name, color: bot.color, avatar: bot.avatar, size: 'sm' }),
             h('span', null, bot.name),
             isAdmin ? h(ui.Tag, { tone: 'brand' }, t('groups.form.admin')) : null,
           )
@@ -1703,6 +1810,220 @@ function UsageTab(props) {
   )
 }
 
+/* ------------------------------------------------------------------- tasks */
+
+/** Status tag tone for one TaskView/HelperView status. */
+function taskStatusTone(status) {
+  if (status === 'running') return 'brand'
+  if (status === 'done') return 'success'
+  if (status === 'failed' || status === 'cancelled' || status === 'stopped' || status === 'interrupted' || status === 'unknown') return 'error'
+  return 'default'
+}
+
+/** One task or helper row. */
+function TaskRow(props) {
+  var t = props.t
+  var store = props.store
+  var entry = props.entry
+  var row = entry.row
+  var pairExpanded = React.useState(false)
+  var expanded = pairExpanded[0]
+  var setExpanded = pairExpanded[1]
+  var isHelper = entry.kind === 'helper'
+  var status = String(row.status === undefined ? 'unknown' : row.status)
+  var title = String(row.title === undefined || row.title === '' ? row.text === undefined ? row.id : String(row.text).slice(0, 80) : row.title)
+  var targetName = ''
+  if (isHelper) {
+    var helperBot = store.botById(row.botId)
+    targetName = helperBot === undefined ? String(row.botId === undefined ? '' : row.botId) : helperBot.name
+  } else if (row.kind === 'discussion') {
+    var group = store.groupById(row.groupId)
+    targetName = group === undefined ? String(row.groupId === undefined ? '' : row.groupId) : group.name
+  } else {
+    var bot = store.botById(row.botId)
+    targetName = bot === undefined ? String(row.botId === undefined ? '' : row.botId) : bot.name
+  }
+  var result = isHelper ? row.report : row.result
+  var hasResult = result !== undefined && result !== null && String(result) !== ''
+  var errorText = row.error === undefined || row.error === null ? '' : String(row.error)
+  var cancelled = props.cancellable === true
+  var at = row.endedAt === undefined ? (row.startedAt === undefined ? row.createdAt : row.startedAt) : row.endedAt
+
+  return h(
+    'div',
+    { className: 'db-task' },
+    h(
+      'div',
+      { className: 'db-task-head' },
+      h(
+        'div',
+        { className: 'db-task-main' },
+        h(
+          'div',
+          { className: 'db-task-title' },
+          h('span', null, title),
+          h(ui.Tag, null, isHelper ? t('tasks.helpers') : row.kind === 'discussion' ? t('tasks.kind.discussion') : t('tasks.kind.bot')),
+          row.batchId === undefined ? null : h(ui.Tag, null, 'batch'),
+        ),
+        h(
+          'div',
+          { className: 'db-task-meta' },
+          h(ui.Tag, { tone: taskStatusTone(status) }, t('tasks.status.' + status)),
+          h('span', null, t('tasks.target') + '：' + targetName),
+          at === undefined ? null : h('span', null, ui.formatDate(at) + ' ' + ui.formatTime(at)),
+        ),
+      ),
+      h(
+        'div',
+        { className: 'db-task-actions' },
+        hasResult
+          ? h(ui.IconButton, {
+              icon: expanded ? 'chevron-up' : 'chevron-down',
+              size: 13,
+              label: expanded ? t('tasks.collapse') : t('tasks.expand'),
+              onClick: function () {
+                setExpanded(!expanded)
+              },
+            })
+          : null,
+        cancelled
+          ? h(ui.ConfirmButton, {
+              label: t('tasks.cancel'),
+              confirmLabel: t('tasks.cancelConfirm'),
+              title: t('tasks.cancel'),
+              onConfirm: props.onCancel,
+            })
+          : null,
+      ),
+    ),
+    errorText === '' ? null : h('div', { className: 'db-task-error' }, errorText),
+    hasResult && expanded ? h('pre', { className: 'db-task-result' }, String(result)) : null,
+    hasResult && !expanded ? h('div', { className: 'db-task-summary' }, String(result).slice(0, 160) + (String(result).length > 160 ? '…' : '')) : null,
+  )
+}
+
+/** Tasks and background helpers, grouped by lifecycle. */
+function TasksTab(props) {
+  var t = props.t
+  var store = props.store
+  useStoreVersion(store)
+  var tasks = store.tasks()
+  var helpers = store.helpers()
+  var groups = { active: [], queued: [], done: [], failed: [] }
+
+  function bucketOf(status) {
+    if (status === 'running') return 'active'
+    if (status === 'queued') return 'queued'
+    if (status === 'done') return 'done'
+    return 'failed'
+  }
+
+  function chatIdOf(row, isHelper) {
+    if (isHelper) return typeof row.chatId === 'string' ? row.chatId : undefined
+    if (typeof row.originChatId === 'string' && row.originChatId !== '' && store.chatById(row.originChatId) !== undefined) {
+      return row.originChatId
+    }
+    var chats = store.chats()
+    if (row.kind === 'discussion' && typeof row.groupId === 'string') {
+      for (var g = 0; g < chats.length; g += 1) {
+        if (chats[g] !== null && chats[g].kind === 'group' && chats[g].groupId === row.groupId) return chats[g].id
+      }
+      return undefined
+    }
+    if (typeof row.botId === 'string') {
+      for (var c = 0; c < chats.length; c += 1) {
+        if (chats[c] !== null && chats[c].kind === 'dm' && chats[c].botId === row.botId) return chats[c].id
+      }
+    }
+    return undefined
+  }
+
+  function cancellableOf(row, isHelper) {
+    if (isHelper) {
+      return (row.status === 'running' || row.status === 'queued') && chatIdOf(row, true) !== undefined
+    }
+    // Batch cancellation waits for a Host route: only single chat tasks cancel.
+    if (row.batchId !== undefined) return false
+    if (row.status !== 'running' && row.status !== 'queued') return false
+    return chatIdOf(row, false) !== undefined
+  }
+
+  function cancelEntry(row, isHelper) {
+    var chatId = chatIdOf(row, isHelper)
+    if (chatId === undefined) {
+      store.flash(t('tasks.cancelUnavailable'), 'error')
+      return
+    }
+    store.cancel(chatId).then(
+      function () {
+        store.flash(t('tasks.cancelled'), 'success')
+      },
+      function (failure) {
+        store.flash(transport.describeError(t, failure), 'error')
+      },
+    )
+  }
+
+  for (var i = 0; i < tasks.length; i += 1) {
+    var task = tasks[i]
+    if (task === null || task === undefined) continue
+    groups[bucketOf(String(task.status))].push({ kind: 'task', row: task })
+  }
+  for (var j = 0; j < helpers.length; j += 1) {
+    var helper = helpers[j]
+    if (helper === null || helper === undefined) continue
+    groups[bucketOf(String(helper.status))].push({ kind: 'helper', row: helper })
+  }
+
+  var total = tasks.length + helpers.length
+  var labels = { active: t('tasks.group.active'), queued: t('tasks.group.queued'), done: t('tasks.group.done'), failed: t('tasks.group.failed') }
+  var body = [h(
+    'div',
+    { key: 'head', className: 'db-row' },
+    h(
+      'div',
+      { className: 'db-grow' },
+      h('h3', { className: 'db-title' }, t('tasks.title')),
+      h('p', { className: 'db-subtitle' }, t('tasks.subtitle')),
+    ),
+    total === 0 ? null : h('span', { className: 'db-hint' }, t('tasks.taskCount', { count: String(tasks.length) }) + ' · ' + t('tasks.helperCount', { count: String(helpers.length) })),
+  )]
+
+  if (total === 0) {
+    body.push(h(ui.Empty, { key: 'empty', glyph: 'tasks', title: t('tasks.empty'), body: t('tasks.emptyHint') }))
+  } else {
+    var order = ['active', 'queued', 'done', 'failed']
+    for (var o = 0; o < order.length; o += 1) {
+      var key = order[o]
+      var entries = groups[key]
+      if (entries.length === 0) continue
+      body.push(
+        h('div', { key: 'group-' + key, className: 'db-section-title' }, labels[key] + ' · ' + String(entries.length)),
+      )
+      for (var e = 0; e < entries.length; e += 1) {
+        ;(function (entry) {
+          var row = entry.row
+          body.push(
+            h(TaskRow, {
+              key: (entry.kind === 'helper' ? 'helper-' : 'task-') + String(row.id),
+              t: t,
+              store: store,
+              entry: entry,
+              cancellable: cancellableOf(row, entry.kind === 'helper'),
+              onCancel: function () {
+                cancelEntry(row, entry.kind === 'helper')
+              },
+            }),
+          )
+        })(entries[e])
+      }
+    }
+    body.push(h('p', { key: 'cancel-hint', className: 'db-hint' }, t('tasks.cancelHint')))
+  }
+
+  return h('div', { className: 'db-stack' }, body)
+}
+
 /* ------------------------------------------------- settings.section page */
 
 /** Optional full settings page: the compact entry to the workspace. */
@@ -1739,6 +2060,7 @@ function SettingsSectionPage(props) {
 
 module.exports = {
   SettingsDrawer: SettingsDrawer,
+  TasksTab: TasksTab,
   SettingsSectionPage: SettingsSectionPage,
   GeneralTab: GeneralTab,
   BotsTab: BotsTab,

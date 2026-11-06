@@ -329,9 +329,11 @@ export function selectGroupMessages({ messages, lastSeenSeq, botId, botName, lim
       : message.role === 'relay'
         ? (message.botName ?? 'relay')
         : (botName(message.botId)?.name ?? 'bot')
-    const text = message.role === 'bot' || message.role === 'relay'
+    let text = message.role === 'bot' || message.role === 'relay'
       ? message.text
       : (message.parts?.find(part => part.type === 'text')?.text ?? message.text)
+    const manifest = message.role === 'user' && typeof message.attachmentManifest === 'string' ? message.attachmentManifest : ''
+    if (manifest !== '') text = `${text ?? ''}\n${manifest}`
     return `[${neutralizeMarks(String(who)).slice(0, 60)}] ${neutralizeMarks(String(text ?? '')).slice(0, GROUP_LINE_MAX)}`
   })
   const lastIncluded = recent.at(-1)?.seq ?? cursor

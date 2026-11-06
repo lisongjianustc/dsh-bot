@@ -11,6 +11,7 @@
  *
  * @module @lisongjianustc/dsh-bot/host/routes
  */
+import { MAX_UPLOAD_BYTES } from './attachments.js'
 import { BotError, describeError, isBotError, statusForCode } from './errors.js'
 import { clip } from './util.js'
 
@@ -102,6 +103,18 @@ async function readJson(req) {
     if (isBotError(error)) throw error
     throw new BotError('invalid-request', 'the request body is not valid JSON')
   }
+}
+
+/** Read one raw body under the upload cap. */
+async function readRaw(req, limit) {
+  const chunks = []
+  let size = 0
+  for await (const chunk of req) {
+    size += chunk.length
+    if (size > limit) throw new BotError('body-too-large', `the uploaded file exceeds ${limit} bytes`)
+    chunks.push(chunk)
+  }
+  return Buffer.concat(chunks)
 }
 
 /** Read a required string field. */
@@ -214,7 +227,12 @@ export function registerRoutes({ ctx, store, services, runtime, hub, prompt, dis
     const action = String(body.action ?? 'send')
     if (action === 'send') {
       const chat = await resolveChat(body)
-      const text = requireString(body, 'text')
+      const attachmentIds = Array.isArray(body.attachments)
+        ? body.attachments.filter(id => typeof id === 'string' && id !== '')
+        : []
+      const views = services.attachments.viewsOf(attachmentIds)
+      const text = String(body.text ?? '').trim()
+      if (text === '' && views.length === 0) throw new BotError('invalid-request', 'a message needs text or an attachment')
       const clientMessageId = typeof body.clientMessageId === 'string' && body.clientMessageId !== ''
         ? clip(body.clientMessageId, 120)
         : undefined
@@ -222,11 +240,17 @@ export function registerRoutes({ ctx, store, services, runtime, hub, prompt, dis
         const existing = services.messages.list(chat.id).find(message => message.clientMessageId === clientMessageId)
         if (existing !== undefined) return await stateReply({ chat: services.chats.view(chat) })
       }
+      const manifest = services.attachments.manifestFor(attachmentIds)
       const message = await services.messages.append(chat.id, {
         role: 'user',
         text,
         status: 'done',
-        parts: [{ type: 'text', text }],
+        parts: [
+          ...services.attachments.partsOf(views),
+          ...(text === '' ? [] : [{ type: 'text', text }]),
+        ],
+        ...(views.length === 0 ? {} : { attachments: views }),
+        ...(manifest === '' ? {} : { attachmentManifest: manifest }),
         ...(clientMessageId === undefined ? {} : { clientMessageId }),
       })
       hub?.publish?.({ type: 'message', message })
@@ -504,6 +528,12 @@ export function registerRoutes({ ctx, store, services, runtime, hub, prompt, dis
         return
       }
       if (method === 'GET') {
+        if (path === '/media') {
+          const id = url.searchParams.get('id')
+          if (id === null || id === '') throw new BotError('invalid-request', 'the media route needs an id')
+          services.attachments.send(res, id)
+          return
+        }
         if (path === '/state') {
           writeJson(res, 200, { ok: true, state: await services.fullStateView() })
           return
@@ -526,6 +556,15 @@ export function registerRoutes({ ctx, store, services, runtime, hub, prompt, dis
         return
       }
       if (method === 'POST') {
+        // The upload route carries raw bytes, not JSON.
+        if (path === '/upload') {
+          const name = url.searchParams.get('name') ?? 'file'
+          const declared = String(req.headers['content-type'] ?? '')
+          const bytes = await readRaw(req, MAX_UPLOAD_BYTES)
+          const stored = await services.attachments.put(bytes, { name, mime: declared })
+          writeJson(res, 200, { ok: true, attachment: stored.attachment })
+          return
+        }
         const contentType = String(req.headers['content-type'] ?? '').toLowerCase()
         if (!contentType.startsWith('application/json')) {
           refuse(res, 415, 'json-required', 'this route accepts application/json only')

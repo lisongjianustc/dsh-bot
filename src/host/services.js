@@ -9,6 +9,8 @@
  * @module @lisongjianustc/dsh-bot/host/services
  */
 import { mkdirSync } from 'node:fs'
+import { createAttachments } from './attachments.js'
+import { avatarForBot, isAvatarId, normalizeAvatar } from './avatars.js'
 import { BotError, describeError } from './errors.js'
 import {
   ENTRY_MAX,
@@ -71,7 +73,9 @@ function botDraft(input) {
   const model = input.model === undefined || input.model === null ? null : modelPin(input.model)
   const color = /^#[0-9a-fA-F]{6}$/.test(String(input.color ?? '')) ? String(input.color) : '#6b7cff'
   const skin = clip(String(input.skin ?? 'default').trim(), 40) || 'default'
-  const avatar = typeof input.avatar === 'string' && input.avatar !== '' ? clip(input.avatar, 200) : undefined
+  const workspace = input.workspaceId === undefined || input.workspaceId === null || String(input.workspaceId).trim() === ''
+    ? undefined
+    : String(input.workspaceId).trim()
   return {
     name,
     role,
@@ -80,8 +84,10 @@ function botDraft(input) {
     model,
     color,
     skin,
-    ...(avatar === undefined ? {} : { avatar }),
+    avatarInput: input.avatar,
+    ...(workspace === undefined ? {} : { workspaceId: workspace }),
     autoHelper: input.autoHelper !== false,
+    autoAvatar: input.autoAvatar !== false,
     isMain: input.isMain === true,
     // Unattended Bot turns answer their own approval requests unless the user
     // opts out; an explicit `false` is what sends them down the waterfall.
@@ -206,6 +212,58 @@ export function createServices({ ctx, config = {}, store }) {
     },
   }
 
+  /**
+   * Resolve the DSH workspaces this deployment offers (the per-Bot cwd picker).
+   * A deployment without the registry serves an empty list rather than failing.
+   * @returns {{ id: string, title: string, path?: string }[]} the workspaces.
+   */
+  const workspaceList = () => {
+    const registry = typeof ctx?.get === 'function' ? ctx.get('workspaceRegistry') : undefined
+    if (registry === undefined || registry === null || typeof registry.list !== 'function') return []
+    let rows
+    try {
+      rows = registry.list()
+    } catch {
+      return []
+    }
+    if (!Array.isArray(rows)) return []
+    return rows.flatMap((row) => {
+      const id = String(row?.id ?? '')
+      if (id === '') return []
+      return [{
+        id,
+        title: typeof row.title === 'string' && row.title !== '' ? row.title : id,
+        ...(typeof row.path === 'string' && row.path !== '' ? { path: row.path } : {}),
+      }]
+    })
+  }
+
+  /**
+   * Validate one Bot workspace pin. A pinned workspace must exist NOW; an
+   * unknown id is refused rather than silently falling back to the shared one.
+   * @param {string} workspaceId - the pinned id.
+   * @returns {object} the workspace row.
+   */
+  const requireWorkspace = (workspaceId) => {
+    const registry = typeof ctx?.get === 'function' ? ctx.get('workspaceRegistry') : undefined
+    if (registry === undefined || registry === null) {
+      throw new BotError('workspace-unavailable', 'this deployment serves no workspace registry, so a bot cannot pin a workspace')
+    }
+    let found
+    try {
+      found = typeof registry.get === 'function' ? registry.get(workspaceId) : undefined
+    } catch {
+      found = undefined
+    }
+    if (found === undefined || found === null) {
+      found = workspaceList().find(row => row.id === workspaceId)
+    }
+    if (found === undefined || found === null) {
+      throw new BotError('workspace-unavailable', `no workspace has the id "${workspaceId}"`)
+    }
+    return found
+  }
+
   // ------------------------------------------------------------------ bots
   const findBot = (ref) => {
     if (ref === undefined || ref === null || ref === '') return undefined
@@ -244,10 +302,18 @@ export function createServices({ ctx, config = {}, store }) {
       }
       const first = db.bots.length === 0
       const wantsMain = fields.isMain && !db.bots.some(bot => bot.isMain)
+      const isMain = first || wantsMain
+      if (fields.workspaceId !== undefined) requireWorkspace(fields.workspaceId)
+      const identity = { name: fields.name, role: fields.role, instructions: fields.instructions, isMain }
+      const avatar = normalizeAvatar(fields.avatarInput, identity)
+      const { avatarInput, ...rest } = fields
+      void avatarInput
       const bot = {
         id: newId('bot'),
-        ...fields,
-        isMain: first || wantsMain,
+        ...rest,
+        avatar: avatar.spec,
+        avatarAuto: avatar.auto && fields.autoAvatar !== false,
+        isMain,
         createdAt: now(),
         updatedAt: now(),
         rev: 1,
@@ -270,9 +336,20 @@ export function createServices({ ctx, config = {}, store }) {
         skin: source.skin ?? bot.skin,
         avatar: source.avatar === undefined ? bot.avatar : source.avatar,
         autoHelper: source.autoHelper === undefined ? bot.autoHelper : source.autoHelper,
+        autoAvatar: source.autoAvatar === undefined ? (bot.avatarAuto !== false) : source.autoAvatar,
         autoApprove: source.autoApprove === undefined ? (bot.autoApprove !== false) : source.autoApprove,
+        workspaceId: source.workspaceId === undefined ? bot.workspaceId : source.workspaceId,
         isMain: bot.isMain,
       })
+      if (merged.workspaceId !== undefined && merged.workspaceId !== bot.workspaceId) {
+        requireWorkspace(merged.workspaceId)
+      }
+      const identity = { name: merged.name, role: merged.role, instructions: merged.instructions, isMain: bot.isMain }
+      const identityChanged = merged.name !== bot.name || merged.role !== bot.role || merged.instructions !== bot.instructions
+      // An explicit avatar wins; otherwise an auto avatar follows the identity.
+      const avatar = source.avatar !== undefined
+        ? normalizeAvatar(source.avatar, identity)
+        : (bot.avatarAuto !== false && identityChanged ? normalizeAvatar(null, identity) : { spec: avatarForBot(bot), auto: bot.avatarAuto !== false })
       if (db.bots.some(other => other.id !== bot.id && other.name.toLowerCase() === merged.name.toLowerCase())) {
         throw new BotError('invalid-request', `a bot named "${merged.name}" already exists`)
       }
@@ -285,7 +362,13 @@ export function createServices({ ctx, config = {}, store }) {
         if (heir !== undefined) heir.isMain = true
         merged.isMain = false
       }
-      Object.assign(bot, merged, { updatedAt: now(), rev: (bot.rev ?? 0) + 1 })
+      // Destructure AFTER the main-flag decision, so the committed write carries it.
+      const { avatarInput, ...rest } = merged
+      void avatarInput
+      rest.avatar = avatar.spec
+      rest.avatarAuto = avatar.auto && merged.autoAvatar !== false
+      Object.assign(bot, rest, { updatedAt: now(), rev: (bot.rev ?? 0) + 1 })
+      if (source.workspaceId !== undefined && merged.workspaceId === undefined) delete bot.workspaceId
       await store.save()
       return bot
     },
@@ -820,6 +903,80 @@ export function createServices({ ctx, config = {}, store }) {
     },
   }
 
+  /** Uploaded files, content-addressed under `$DSH_HOME/dsh-bot/uploads`. */
+  const attachments = createAttachments({ store })
+
+  // ---------------------------------------------------------------- tasks
+  /** The client-facing projection of one dispatched task. */
+  const taskView = (record) => compact({
+    id: record.id,
+    kind: record.kind ?? 'bot',
+    botId: record.botId,
+    groupId: record.groupId,
+    text: clip(record.text ?? '', 20000),
+    title: record.title ?? '',
+    status: record.status ?? 'queued',
+    requestId: record.requestId,
+    batchId: record.batchId,
+    ...(Array.isArray(record.dependsOn) && record.dependsOn.length > 0 ? { dependsOn: [...record.dependsOn] } : {}),
+    result: record.result === undefined ? undefined : clip(record.result, 8000),
+    error: record.error === undefined ? undefined : clip(record.error, 800),
+    messageId: record.messageId,
+    originChatId: record.originChatId,
+    createdAt: record.createdAt ?? 0,
+    startedAt: record.startedAt,
+    endedAt: record.endedAt,
+  })
+
+  const tasks = {
+    list() {
+      return [...db.tasks]
+    },
+    get(id) {
+      return db.tasks.find(record => record.id === String(id ?? ''))
+    },
+    require(id) {
+      const record = tasks.get(id)
+      if (record === undefined) throw new BotError('invalid-request', `no task matches "${String(id ?? '')}"`)
+      return record
+    },
+    batch(id) {
+      return db.taskBatches[String(id ?? '')]
+    },
+    batches() {
+      return Object.values(db.taskBatches)
+    },
+    taskView,
+    async createMany(records) {
+      db.tasks.push(...records)
+      await store.save()
+      return records
+    },
+    async createBatch(batch) {
+      db.taskBatches[batch.id] = batch
+      await store.save()
+      return batch
+    },
+    async update(id, patch) {
+      const record = tasks.get(id)
+      if (record === undefined) return undefined
+      Object.assign(record, patch)
+      await store.save()
+      return record
+    },
+    async updateBatch(id, patch) {
+      const batch = db.taskBatches[String(id ?? '')]
+      if (batch === undefined) return undefined
+      Object.assign(batch, patch)
+      await store.save()
+      return batch
+    },
+    /** Find a batch by its owner Bot and caller-supplied request id. */
+    batchByRequest(ownerBotId, requestId) {
+      return Object.values(db.taskBatches).find(batch => batch.ownerBotId === ownerBotId && batch.requestId === requestId)
+    },
+  }
+
   // -------------------------------------------------------------- helpers
   /** The client-facing projection of one background helper. */
   const helperView = (record) => compact({
@@ -1076,7 +1233,8 @@ export function createServices({ ctx, config = {}, store }) {
       instructions: bot.instructions ?? '',
       skin: bot.skin ?? 'default',
       color: bot.color ?? '#6b7cff',
-      avatar: bot.avatar,
+      avatar: avatarForBot(bot),
+      ...(bot.workspaceId === undefined ? {} : { workspaceId: bot.workspaceId }),
       isMain: bot.isMain === true,
       model: bot.model ?? null,
       permission: bot.permission ?? 'danger-full-access',
@@ -1109,6 +1267,8 @@ export function createServices({ ctx, config = {}, store }) {
     limits: LIMITS,
     schedules: Object.values(db.schedules).map(scheduleView),
     helpers: helpers.list(),
+    tasks: tasks.list().map(taskView),
+    workspaces: workspaceList(),
   })
 
   /** The view with the optional model catalog attached. */
@@ -1118,10 +1278,30 @@ export function createServices({ ctx, config = {}, store }) {
     return models === undefined ? view : { ...view, models }
   }
 
+  /** Give every stored Bot a renderable avatar; old records had none. */
+  const backfillAvatars = async () => {
+    let changed = false
+    for (const bot of db.bots) {
+      if (bot.avatar !== undefined && bot.avatar !== null && isAvatarId(bot.avatar.id)) continue
+      bot.avatar = avatarForBot(bot)
+      if (bot.avatarAuto === undefined) bot.avatarAuto = true
+      changed = true
+    }
+    if (changed) await store.save().catch(() => undefined)
+  }
+
   const dispose = async () => {
     running.clear()
     await store.close()
   }
+
+  // The mount-time integrity pass: old avatars are filled and a message frozen
+  // mid-stream by a crash is settled, without blocking the plugin's activation.
+  queueMicrotask(() => {
+    void backfillAvatars()
+      .then(() => recover())
+      .catch(error => log('warn', 'the boot-time ledger repair did not finish', error))
+  })
 
   return {
     bots,
@@ -1132,7 +1312,17 @@ export function createServices({ ctx, config = {}, store }) {
     usage,
     schedules,
     running: runningApi,
+    attachments,
+    tasks,
     ensureWorkspace,
+    /**
+     * The workspace one Bot pins, or undefined when it uses the shared one.
+     * A pin that no longer resolves is an error, never a silent fallback.
+     */
+    resolveWorkspace(bot) {
+      if (bot === undefined || bot === null || bot.workspaceId === undefined) return undefined
+      return requireWorkspace(bot.workspaceId)
+    },
     stateView,
     fullStateView,
     modelCatalog,

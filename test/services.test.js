@@ -263,6 +263,78 @@ test('services: a bot approves its own unattended tool requests unless autoAppro
   assert.equal(services.bots.get(alice.id).autoApprove, true)
 })
 
+test('services: every bot gets a renderable avatar, and an explicit one wins', async (t) => {
+  const { services } = make(t)
+  const alice = await services.bots.create({ name: 'Alice', role: '研究员' })
+  assert.equal(alice.avatar.id, 'research-flask')
+  const view = await services.stateView()
+  assert.equal(view.bots[0].avatar.kind, 'library')
+  assert.match(view.bots[0].avatar.color, /^#[0-9a-f]{6}$/)
+  assert.ok(view.bots[0].avatar.background)
+  const explicit = await services.bots.create({ name: 'Bob', role: '工程师', avatar: 'star-star' })
+  assert.equal(explicit.avatar.id, 'star-star')
+  // An auto avatar follows the identity...
+  const rerolled = await services.bots.update(alice.id, { role: '视觉设计' })
+  assert.equal(rerolled.avatar.id, 'design-palette')
+  // ...an explicit one stays put...
+  const kept = await services.bots.update(explicit.id, { role: '法务合规' })
+  assert.equal(kept.avatar.id, 'star-star')
+  // ...and null means "match me again".
+  const rematched = await services.bots.update(explicit.id, { avatar: null })
+  assert.equal(rematched.avatar.id, 'legal-scale')
+  await assert.rejects(() => services.bots.update(alice.id, { avatar: 'no-such-avatar' }), (error) => error.code === 'invalid-request')
+})
+
+test('services: an old bot without an avatar still renders one', async (t) => {
+  const { services, store } = make(t)
+  const alice = await services.bots.create({ name: 'Alice', role: '工程师' })
+  delete alice.avatar
+  delete alice.avatarAuto
+  const view = await services.stateView()
+  assert.equal(view.bots[0].avatar.id, 'engineer-wrench')
+  void store
+})
+
+test('services: a bot may pin a DSH workspace by id', async (t) => {
+  const workspace = { id: 'ws-user', title: 'My Project', path: '/tmp/project' }
+  const registry = {
+    list: () => [workspace, { id: 'ws-other', title: 'Other', path: '/tmp/other' }],
+    get: (id) => (id === workspace.id || id === 'ws-other' ? workspace : undefined),
+    async resolveByPath() {
+      return workspace
+    },
+    async create() {
+      return workspace
+    },
+  }
+  const { services } = make(t, registry)
+  const view = await services.stateView()
+  assert.deepEqual(view.workspaces.map(row => row.id), ['ws-user', 'ws-other'])
+  assert.equal(view.workspaces[0].title, 'My Project')
+  const alice = await services.bots.create({ name: 'Alice', workspaceId: 'ws-user' })
+  assert.equal(alice.workspaceId, 'ws-user')
+  assert.equal((await services.stateView()).bots[0].workspaceId, 'ws-user')
+  const updated = await services.bots.update(alice.id, { workspaceId: 'ws-other' })
+  assert.equal(updated.workspaceId, 'ws-other')
+  await assert.rejects(
+    () => services.bots.update(alice.id, { workspaceId: 'ws-missing' }),
+    (error) => error.code === 'workspace-unavailable',
+  )
+  // null/blank clears the pin and returns to the shared bot workspace.
+  const cleared = await services.bots.update(alice.id, { workspaceId: null })
+  assert.equal(cleared.workspaceId, undefined)
+})
+
+test('services: a deployment without a workspace registry reports plain behaviours', async (t) => {
+  const { services } = make(t)
+  const view = await services.stateView()
+  assert.deepEqual(view.workspaces, [])
+  await assert.rejects(
+    () => services.bots.create({ name: 'Alice', workspaceId: 'ws-any' }),
+    (error) => error.code === 'workspace-unavailable',
+  )
+})
+
 test('services: helper records are created, listed and settled', async (t) => {
   const { services } = make(t)
   const alice = await services.bots.create({ name: 'Alice' })
@@ -281,6 +353,32 @@ test('services: helper records are created, listed and settled', async (t) => {
   assert.equal(view.helpers[0].report, 'green')
   assert.equal(services.helpers.get(created.id).childId, 'child_1')
   assert.throws(() => services.helpers.require('helper_nope'), (error) => error.code === 'helper-not-found')
+})
+
+test('services: dispatched tasks and batches are projected into the state', async (t) => {
+  const { services } = make(t)
+  const alice = await services.bots.create({ name: 'Alice' })
+  const chat = services.chats.findDm(alice.id)
+  await services.tasks.createMany([
+    {
+      id: 'task_1', kind: 'bot', botId: alice.id, text: 'do work', title: 'work', status: 'queued',
+      requestId: 'r1', batchId: 'batch_1', ownerBotId: alice.id, originChatId: chat.id, createdAt: 1,
+    },
+    {
+      id: 'task_2', kind: 'discussion', groupId: 'grp_x', text: 'discuss', title: 'talk', status: 'done',
+      requestId: 'r1', batchId: 'batch_1', ownerBotId: alice.id, originChatId: chat.id, result: 'agreed', createdAt: 2,
+    },
+  ])
+  await services.tasks.createBatch({ id: 'batch_1', ownerBotId: alice.id, requestId: 'r1', fingerprint: 'f', taskIds: ['task_1', 'task_2'], status: 'running', createdAt: 1 })
+  const view = await services.stateView()
+  assert.equal(view.tasks.length, 2)
+  assert.equal(view.tasks.find(task => task.id === 'task_1').status, 'queued')
+  assert.equal(view.tasks.find(task => task.id === 'task_2').result, 'agreed')
+  assert.equal(services.tasks.batch('batch_1').requestId, 'r1')
+  assert.equal(services.tasks.batchByRequest(alice.id, 'r1').id, 'batch_1')
+  assert.equal(services.tasks.batchByRequest('other', 'r1'), undefined)
+  await services.tasks.update('task_1', { status: 'done', result: 'done!' })
+  assert.equal(services.tasks.get('task_1').result, 'done!')
 })
 
 test('services: the notice language follows the ledger settings', async (t) => {

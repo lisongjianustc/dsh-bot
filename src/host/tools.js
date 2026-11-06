@@ -14,6 +14,7 @@
  * @module @lisongjianustc/dsh-bot/host/tools
  */
 import { BotError, describeError } from './errors.js'
+import { createTasks } from './tasks.js'
 import { clip } from './util.js'
 
 /** Registered tool names, in registration order. */
@@ -36,6 +37,9 @@ export const TOOL_NAMES = [
   'bot_start_helper',
   'bot_list_helpers',
   'bot_stop_helper',
+  'bot_dispatch_tasks',
+  'bot_get_tasks',
+  'bot_cancel_tasks',
 ]
 
 /** The output definition every tool shares: one JSON text block. */
@@ -96,6 +100,16 @@ export function registerTools({ ctx, services, dispatcher, runtime }) {
     if (bot.isMain !== true) throw new BotError('invalid-request', 'only the main bot may do this')
     return bot
   }
+  /** The dispatched-task engine, created once per mount. */
+  let taskEngine
+  const taskEngineReady = createTasks({ ctx, services, dispatcher })
+  taskEngine = taskEngineReady
+  // The task queue stops with the plugin fiber, so a reload never leaves a
+  // background pump writing into a closing ledger.
+  if (typeof ctx.effect === 'function') {
+    ctx.effect(() => () => taskEngineReady.dispose(), 'dsh-bot: task dispatch queue')
+  }
+
   const visible = ({ agent }) => services.bots.botOfSession(agent?.id) !== undefined
   /** Helper tools follow the Bot's own `autoHelper` switch, like its brief says. */
   const HELPER_TOOL_NAMES = new Set(['bot_start_helper', 'bot_list_helpers', 'bot_stop_helper'])
@@ -591,6 +605,78 @@ export function registerTools({ ctx, services, dispatcher, runtime }) {
         return { ok: true, helper: { id: stopped.id, title: stopped.title, status: stopped.status } }
       },
     }),
+
+    defineTool({
+      name: 'bot_dispatch_tasks',
+      description: 'Dispatch a batch of background tasks and return a receipt immediately. Each task targets another Bot (id or name) or a group (`group:<ref>` or a bare group name) for a discussion round. A receipt is not a result: poll bot_get_tasks, or read the relay messages posted back here. request_id makes a retry idempotent.',
+      parameters: schema({
+        tasks: {
+          type: 'array',
+          description: '1 to 32 tasks',
+          items: {
+            type: 'object',
+            properties: {
+              to: STRING('target bot id/name, or group:<group id/name>'),
+              message: STRING('the task text, at most 20000 characters'),
+              title: STRING('short task name, at most 80 characters'),
+            },
+            required: ['to', 'message'],
+            additionalProperties: false,
+          },
+        },
+        request_id: STRING('idempotency key: 1..128 letters, digits, dots, dashes or underscores'),
+      }, ['tasks']),
+      async execute(args, exec) {
+        const caller = callerOf(exec)
+        const found = services.chats.bySession(exec.agent?.id)
+        if (found === undefined) throw new BotError('invalid-request', 'this session has no chat to report into')
+        const receipt = await taskEngine.dispatch({
+          ownerBot: caller,
+          originChat: found.chat,
+          entries: Array.isArray(args.tasks) ? args.tasks : [],
+          requestId: args.request_id,
+        })
+        return { ...receipt, note: 'This is a receipt. Poll bot_get_tasks or wait for the relay messages.' }
+      },
+    }),
+    defineTool({
+      name: 'bot_get_tasks',
+      description: 'Read dispatched tasks and batches: current status, result (8000 characters per page) and a wait for a status change of up to 20 seconds. Name a task_id, a batch_id or the request_id used at dispatch.',
+      parameters: schema({
+        task_id: STRING('task id'),
+        batch_id: STRING('batch id from the dispatch receipt'),
+        request_id: STRING('the request_id used at dispatch'),
+        wait_ms: { type: 'number', description: 'wait up to 20000 ms for a status change' },
+        result_offset: { type: 'number', description: 'result page offset for long results' },
+      }),
+      async execute(args, exec) {
+        const caller = callerOf(exec)
+        return await taskEngine.get({
+          ownerBotId: caller.id,
+          taskId: args.task_id,
+          batchId: args.batch_id,
+          requestId: args.request_id,
+          waitMs: args.wait_ms,
+          resultOffset: args.result_offset,
+        })
+      },
+    }),
+    defineTool({
+      name: 'bot_cancel_tasks',
+      description: 'Cancel the unfinished tasks of one task or one batch. A queued task is cancelled at once; a running task is marked so its late output is dropped. Already finished tasks are ignored.',
+      parameters: schema({
+        task_id: STRING('task id'),
+        batch_id: STRING('batch id'),
+      }),
+      async execute(args, exec) {
+        const caller = callerOf(exec)
+        return await taskEngine.cancel({
+          ownerBotId: caller.id,
+          taskId: args.task_id,
+          batchId: args.batch_id,
+        })
+      },
+    }),
   ]
 
   const disposers = []
@@ -604,6 +690,7 @@ export function registerTools({ ctx, services, dispatcher, runtime }) {
     }
   }
   return () => {
+    taskEngineReady.dispose()
     for (const dispose of disposers.splice(0)) {
       try {
         dispose()

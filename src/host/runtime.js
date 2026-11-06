@@ -368,7 +368,11 @@ export function createRuntime({ ctx, store, services, hub, config = {} }) {
 
   /** Create one fresh Bot session in the shared workspace. */
   const createSession = async (chat, bot) => {
-    const workspace = await services.ensureWorkspace()
+    // A Bot may pin one DSH workspace; otherwise every Bot shares the plugin's
+    // own workspace. The pin only decides where NEW sessions are created: an
+    // existing session keeps its recorded cwd.
+    const pinned = typeof services.resolveWorkspace === 'function' ? services.resolveWorkspace(bot) : undefined
+    const workspace = pinned ?? await services.ensureWorkspace()
     // `sessionController.create` is the ONLY creation path that composes the
     // session's Agent preset (the preset is mounted through the controller's
     // setup callback), so it is what gives a Bot the deployment's standard tool

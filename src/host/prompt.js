@@ -52,6 +52,9 @@ export const BOT_TOOL_NAMES = [
   'bot_start_helper',
   'bot_list_helpers',
   'bot_stop_helper',
+  'bot_dispatch_tasks',
+  'bot_get_tasks',
+  'bot_cancel_tasks',
 ]
 
 /**
@@ -171,6 +174,7 @@ export function briefFor({ bot, bots, groups, group, settings, note }) {
     }
   }
   lines.push(`- bot_message → ${zh ? '给另一个 Bot 发一条任务消息' : 'send a task message to another Bot'}`)
+  lines.push(`- bot_dispatch_tasks / bot_get_tasks / bot_cancel_tasks → ${zh ? '批量派活、查询状态与结果、取消未完成任务（受理≠完成，结果会作为 relay 消息回到这里）' : 'dispatch a batch of tasks, read their status and results, cancel unfinished ones (a receipt is not a result; results arrive as relay messages)'}`)
   if (bot.autoHelper !== false) {
     lines.push(`- bot_start_helper / bot_list_helpers / bot_stop_helper → ${zh ? '起一个隐藏会话的后台 helper，稍后回投报告并由你验收' : 'start a hidden-session background helper, then verify its report when it comes back'}`)
   }
