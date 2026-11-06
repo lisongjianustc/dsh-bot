@@ -219,6 +219,126 @@ function appendCursor(element, cursorClass) {
 }
 
 /**
+ * Split one GFM table row into raw cells.
+ *
+ * Leading/trailing pipes are optional, and `\|` escapes a literal pipe inside
+ * a cell (the escape is undone here so the inline parser sees plain text).
+ */
+function splitTableRow(line) {
+  var value = String(line === undefined || line === null ? '' : line).trim()
+  if (value.charAt(0) === '|') value = value.slice(1)
+  if (value.charAt(value.length - 1) === '|') value = value.slice(0, -1)
+  var cells = []
+  var buffer = ''
+  for (var i = 0; i < value.length; i += 1) {
+    var char = value.charAt(i)
+    if (char === '\\' && value.charAt(i + 1) === '|') {
+      buffer += '|'
+      i += 1
+      continue
+    }
+    if (char === '|') {
+      cells.push(buffer.trim())
+      buffer = ''
+      continue
+    }
+    buffer += char
+  }
+  cells.push(buffer.trim())
+  return cells
+}
+
+/** Column alignment from one separator cell, or null when it is not one. */
+function alignmentOf(cell) {
+  var value = String(cell === undefined ? '' : cell).trim()
+  if (!/^:?-{3,}:?$/.test(value)) return null
+  var left = value.charAt(0) === ':'
+  var right = value.charAt(value.length - 1) === ':'
+  if (left && right) return 'center'
+  if (right) return 'right'
+  return 'left'
+}
+
+/**
+ * The alignments of a separator row (`| --- | :---: | ---: |`), or null when
+ * the line is not a separator. The cell count must match the header.
+ */
+function tableAlignments(line) {
+  if (String(line).indexOf('|') < 0) return null
+  var cells = splitTableRow(line)
+  if (cells.length === 0) return null
+  var alignments = []
+  for (var i = 0; i < cells.length; i += 1) {
+    var alignment = alignmentOf(cells[i])
+    if (alignment === null) return null
+    alignments.push(alignment)
+  }
+  return alignments
+}
+
+/** Cell class for one alignment (left is the default). */
+function alignClass(alignment) {
+  if (alignment === 'center') return 'db-md-align-center'
+  if (alignment === 'right') return 'db-md-align-right'
+  return undefined
+}
+
+/** Render one GFM table starting at `lines[start]`, or null when it is not one. */
+function renderTable(lines, start, keyName) {
+  if (start + 1 >= lines.length) return null
+  if (String(lines[start]).indexOf('|') < 0) return null
+  var headerCells = splitTableRow(lines[start])
+  var alignments = tableAlignments(lines[start + 1])
+  if (alignments === null || alignments.length !== headerCells.length) return null
+  var index = start + 2
+  var rows = []
+  while (index < lines.length && lines[index].trim() !== '' && lines[index].indexOf('|') >= 0) {
+    var cells = splitTableRow(lines[index])
+    while (cells.length < headerCells.length) cells.push('')
+    if (cells.length > headerCells.length) cells = cells.slice(0, headerCells.length)
+    rows.push(cells)
+    index += 1
+  }
+  var headCells = []
+  for (var hi = 0; hi < headerCells.length; hi += 1) {
+    headCells.push(
+      h(
+        'th',
+        { key: 'th-' + hi, className: alignClass(alignments[hi]), scope: 'col' },
+        inlineNodes(headerCells[hi], keyName + '-th' + hi),
+      ),
+    )
+  }
+  var bodyRows = []
+  for (var r = 0; r < rows.length; r += 1) {
+    var cells = []
+    for (var c = 0; c < rows[r].length; c += 1) {
+      cells.push(
+        h(
+          'td',
+          { key: 'td-' + r + '-' + c, className: alignClass(alignments[c]) },
+          inlineNodes(rows[r][c], keyName + '-td' + r + '-' + c),
+        ),
+      )
+    }
+    bodyRows.push(h('tr', { key: 'tr-' + r }, cells))
+  }
+  return {
+    element: h(
+      'div',
+      { className: 'db-md-table-wrap' },
+      h(
+        'table',
+        { className: 'db-md-table' },
+        h('thead', null, h('tr', null, headCells)),
+        bodyRows.length === 0 ? null : h('tbody', null, bodyRows),
+      ),
+    ),
+    nextIndex: index,
+  }
+}
+
+/**
  * Render Markdown text to an array of React elements.
  * @param text Markdown source.
  * @param cursorClass when set, a streaming cursor span is appended to the last block.
@@ -330,6 +450,18 @@ function render(text, cursorClass) {
           items,
         ),
       )
+      continue
+    }
+
+    // GFM table: a header row plus a matching `---` separator row. Without the
+    // separator the lines stay ordinary paragraph text, so `a | b` never turns
+    // into a table by accident.
+    var tableKey = nextKey('table')
+    var table = renderTable(lines, index, tableKey)
+    if (table !== null) {
+      table.element = React.cloneElement(table.element, { key: tableKey + '-wrap' })
+      blocks.push(table.element)
+      index = table.nextIndex
       continue
     }
 

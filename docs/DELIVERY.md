@@ -162,6 +162,21 @@
 - **真实验收**：API 创建群（workspace id + 文件夹路径）→ state 正确；改主目录 + `resetSessions` → 返回 true、会话映射清空，下一条群消息在新目录建会话（`session-74d4af5c…`，目录 `--Users-lisongjian-Project-DeepSeekHarness--`）；GUI 编辑表单正常显示目录 chip/主目录/添加控件/保存按钮。截图 `docs/screenshots/group-directories.png`。
 - **数字**：Host 164/164、Client smoke 196、真实 Host 冒烟 7/7。
 
+### 1.17 v0.4.0：Markdown 表格 + SVG 头像库 v2.1（40 角色）
+
+**A. Markdown 表格（client）**
+- `markdown.js` 支持 GFM 表格：表头 + `:---`/`:---:`/`---:` 分隔行 + 数据行；单元格内 bold/italic/code/link；外层 `overflow-x` 容器（窄屏横滚）；无分隔行/列数不符保持普通段落；XSS 规则不变。
+- 真实验收：Chief「六名成员」消息里的表格从纯文本变成正常表格（截图 `docs/screenshots/markdown-table.png`）；smoke 新增表格/对齐/行内/误判/XSS 断言。
+
+**B. 用户提供的 SVG 头像库（v2.1，40 个角色）**
+- 资产入仓：`assets/avatars/{tile,transparent}/<id>.svg` 各 40 张 + `manifest.json`/`presets-additions.json`/README；`package.json` 的 `files` 已含 `assets`。
+- Host：PRESETS 25 → **40**（15 个新角色：architect-stag/field-otter/risk-eagle/compliance-officer/audit-panda/legaltech-dragon/knowledge-tree/rpa-mecha/agent-sylph/scm-cargo/esg-gaia/strategy-fox/innovation-orb/insight-raven/future-traveler）；新增 `GET /api/avatar/<id>.svg`（白名单 + 路径安全 + immutable/nosniff；`?variant=transparent`）；哈希兜底池 24 → 39。
+- Client：`<img>` 渲染用户插画（40 宫格选择器、换一个、自动匹配预览）；`onError`/旧 Host 回退程序化 SVG；两端 20 组身份匹配探针一致。
+- 真实验收：侧栏/气泡/表单头像显示用户插画；40 宫格全部真实图；Host 路由实测 tile/transparent 200、未知/穿越 404（截图 `docs/screenshots/avatar-grid.png`）。
+- 顺手修复：上一轮补丁误改 BotForm 导致「编辑机器人」白屏，已恢复并加 smoke 回归。
+
+**数字**：Host **169/169**、Client smoke **215**、真实 Host 冒烟 7/7。
+
 ## 3. 安装与验收步骤
 
 ### 3.1 全新安装

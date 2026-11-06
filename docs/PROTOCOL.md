@@ -33,6 +33,7 @@
 | GET | `dsh-bot/api/events?since=<seq>` | SSE | 见 §4 |
 | POST | `dsh-bot/api/upload?name=<name>` | 原始字节（`application/octet-stream` 或图片 mime），≤25 MiB | `{ ok, attachment:{id,name,size,mime,url} }` |
 | GET | `dsh-bot/api/media?id=<attachmentId>` | — | 文件流（图片 inline，其余 attachment） |
+| GET | `dsh-bot/api/avatar/<id>.svg[?variant=transparent]` | — | 头像 SVG（40 个预设之一；id 白名单、immutable cache、nosniff；未知 404） |
 | POST | `dsh-bot/api/config` | `{ patch:{ userName?, language? } }` | `{ ok, state }` |
 
 会话错误码（`code`）：`invalid-request`、`bot-not-found`、`chat-not-found`、`group-not-found`、`session-busy`、`model-unavailable`、`ledger-unavailable`、`internal`。

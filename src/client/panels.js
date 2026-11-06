@@ -434,6 +434,32 @@ function BotsTab(props) {
   )
 }
 
+/** The library grid: every preset as its Host SVG tile, the current one marked. */
+function AvatarGrid(props) {
+  var t = props.t
+  return h(
+    'div',
+    { className: 'db-avatar-grid' },
+    avatarLib.PRESETS.map(function (preset) {
+      var spec = avatarLib.avatarById(preset.id)
+      return h(
+        'button',
+        {
+          key: preset.id,
+          type: 'button',
+          title: preset.intent + ' · ' + preset.id,
+          className: 'db-avatar-choice' + (props.avatarId === preset.id ? ' is-active' : ''),
+          onClick: function () {
+            if (typeof props.onPick === 'function') props.onPick(preset.id)
+          },
+        },
+        h(ui.Avatar, { name: preset.id, avatar: spec, size: 'lg' }),
+        h('span', { className: 'db-avatar-choice-label' }, preset.intent),
+      )
+    }),
+  )
+}
+
 /** Create/edit one bot. */
 function BotForm(props) {
   var t = props.t
@@ -519,19 +545,16 @@ function BotForm(props) {
     inheritLabel += ' (' + String(defaults.provider) + '/' + String(defaults.model) + ')'
   }
 
-  function addWorkspaceChoice(workspaceId) {
-    var list = store.workspaces()
-    for (var i = 0; i < list.length; i += 1) {
-      if (String(list[i].id) !== String(workspaceId)) continue
-      setDirectoryList(directories.addWorkspace(directoryList, list[i]).entries)
-      return
-    }
-  }
+  var identity = { name: name.trim(), role: role.trim(), instructions: instructions, isMain: isNew ? false : bot.isMain === true }
+  var previewAvatar = avatarId === null ? avatarLib.matchAvatar(identity) : avatarLib.avatarById(avatarId)
 
-  function addPickedDirectory() {
-    directories.pickDirectoryEntries(directoryList, props.pickDirectory).then(function (result) {
-      if (result.added === true) setDirectoryList(result.entries)
-    })
+  function cycleAvatar() {
+    var current = -1
+    for (var i = 0; i < avatarLib.PRESETS.length; i += 1) {
+      if (avatarLib.PRESETS[i].id === avatarId) current = i
+    }
+    var next = (current + 1) % avatarLib.PRESETS.length
+    setAvatarId(avatarLib.PRESETS[next].id)
   }
 
   function submit() {
@@ -560,16 +583,9 @@ function BotForm(props) {
     setError('')
     var action = isNew ? store.createBot(payload) : store.updateBot(bot.id, payload)
     action.then(
-      function (result) {
+      function () {
         setSaving(false)
-        var saved = isNew
-          ? store.groups().filter(function (item) { return item.name === name.trim() }).pop()
-          : store.groupById(group.id)
-        var savedDirs = saved === undefined ? [] : directories.normalize(saved.workspaces)
-        var unsupported = directoryList.length > 0 && savedDirs.length !== directoryList.length
-        var sessionsReset = result !== null && typeof result === 'object' && result.sessionsReset === true
-        if (unsupported) store.flash(t('groups.dirsUnsupported'), 'error')
-        else store.flash(sessionsReset ? t('groups.sessionsReset') : t('general.saved'), 'success')
+        store.flash(t('general.saved'), 'success')
         props.onClose()
       },
       function (failure) {
@@ -689,28 +705,14 @@ function BotForm(props) {
       ),
     }),
     avatarGridOpen
-      ? h(
-          'div',
-          { className: 'db-avatar-grid' },
-          avatarLib.PRESETS.map(function (preset) {
-            var spec = avatarLib.avatarById(preset.id)
-            return h(
-              'button',
-              {
-                key: preset.id,
-                type: 'button',
-                title: preset.intent + ' · ' + preset.id,
-                className: 'db-avatar-choice' + (avatarId === preset.id ? ' is-active' : ''),
-                onClick: function () {
-                  setAvatarId(preset.id)
-                  setAvatarGridOpen(false)
-                },
-              },
-              h(ui.Avatar, { name: preset.id, avatar: spec, size: 'lg' }),
-              h('span', { className: 'db-avatar-choice-label' }, preset.intent),
-            )
-          }),
-        )
+      ? h(AvatarGrid, {
+          t: t,
+          avatarId: avatarId,
+          onPick: function (id) {
+            setAvatarId(id)
+            setAvatarGridOpen(false)
+          },
+        })
       : null,
     h(ui.Field, {
       label: t('bots.form.workspace'),
@@ -2200,6 +2202,8 @@ module.exports = {
   BotsTab: BotsTab,
   GroupsTab: GroupsTab,
   GroupForm: GroupForm,
+  BotForm: BotForm,
+  AvatarGrid: AvatarGrid,
   MemoryTab: MemoryTab,
   SchedulesTab: SchedulesTab,
   UsageTab: UsageTab,

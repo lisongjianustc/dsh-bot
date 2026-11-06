@@ -33,7 +33,7 @@
 | **记忆** | 每 Bot 一份 + 团队共享一份；每 turn 6000 字预算、revision 校验、journal。 |
 | **定时任务** | 每日 / 每 N 分钟 / 一次性，由 Host schedule 服务投递到 Bot 会话。 |
 | **富输入** | 文字、图片、文件（粘贴/拖拽/选择）；Bot 收到绝对路径并可直接读取。 |
-| **头像库** | 24 个程序化头像；新 Bot 按名字/角色关键词自动匹配，未知角色哈希稳定兜底。 |
+| **头像库** | 40 个原创 SVG 头像；新 Bot 按名字/角色关键词自动匹配，未知角色哈希稳定兜底。 |
 | **用量与任务面板** | 7/30/90 天用量；batch 任务与后台助手统一在「任务」tab 查看。 |
 | **中英双语 · 市场就绪** | 21 个模型工具、`dsh.bundle`+`dsh.client`、图标/locale/CI 齐全。 |
 
@@ -98,7 +98,7 @@ node scripts/build-client.mjs
 
 - [x] 真实会话 Bot、私聊/群聊、记忆、定时、后台助手、用量
 - [x] 群管理工具 + 任务派单（21/21 工具对齐）
-- [x] 富输入（图片/文件）、每 Bot 工作区、头像库、会话置顶
+- [x] 富输入（图片/文件）、每 Bot 工作区、40 个 SVG 头像库、会话置顶
 - [ ] 每个 Bot 多会话
 - [ ] reactions、HTML/Markdown 预览、工作台内审批卡片
 - [ ] 任务依赖验证回合、用量明细
@@ -107,8 +107,8 @@ node scripts/build-client.mjs
 
 ```sh
 node scripts/build-client.mjs   # src/client/*.js -> lib/client.js
-node --test test/*.test.js      # 158 个 Host 单测
-node scripts/smoke-client.mjs   # 174 项 Client 自检
+node --test test/*.test.js      # 169 个 Host 单测
+node scripts/smoke-client.mjs   # 215 项 Client 自检
 node scripts/verify-live.mjs http://127.0.0.1:<端口>   # 真实 Host 冒烟
 ```
 

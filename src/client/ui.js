@@ -382,11 +382,39 @@ function Avatar(props) {
   else if (props.size === 'xl') className += ' is-xl'
   var edge = AVATAR_EDGE[props.size] === undefined ? AVATAR_EDGE.md : AVATAR_EDGE[props.size]
 
-  if (spec !== undefined) {
+  var pairFailed = React.useState(false)
+  var failed = pairFailed[0]
+  var setFailed = pairFailed[1]
+  var currentId = spec === undefined || spec === null || typeof spec.id !== 'string' ? '' : spec.id
+  React.useEffect(
+    function () {
+      setFailed(false)
+    },
+    [currentId],
+  )
+
+  if (spec !== undefined && spec !== null) {
+    // Known library ids load the Host's original SVG tile; everything else
+    // (offline Host, missing asset, unknown motif) falls back to the bundled
+    // programmatic renderer, so a Bot always has a face.
+    var useImage = failed !== true && currentId !== '' && avatarLib.isAvatarId(currentId)
     return h(
       'span',
-      { className: className + ' is-svg', title: name, 'aria-hidden': 'true' },
-      avatarLib.renderAvatar(spec, edge),
+      { className: className + ' is-svg' + (useImage ? ' is-image' : ''), title: name, 'aria-hidden': 'true' },
+      useImage
+        ? h('img', {
+            className: 'db-avatar-img',
+            src: avatarLib.imageUrl(currentId),
+            alt: '',
+            draggable: false,
+            width: edge,
+            height: edge,
+            loading: 'lazy',
+            onError: function () {
+              setFailed(true)
+            },
+          })
+        : avatarLib.renderAvatar(spec, edge),
     )
   }
 

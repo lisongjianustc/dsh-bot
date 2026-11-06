@@ -13,10 +13,14 @@ import {
 import { BotError } from '../src/host/errors.js'
 
 test('avatars: the library is the documented presets plus the fallback', () => {
-  // 24 matched presets + the default fallback row from the table.
-  assert.equal(AVATAR_PRESETS.length, 25)
+  // 24 original + 15 SVG-library additions + the default fallback row = 40.
+  assert.equal(AVATAR_PRESETS.length, 40)
   const ids = new Set(AVATAR_PRESETS.map(preset => preset.id))
-  assert.equal(ids.size, 25)
+  assert.equal(ids.size, 40)
+  // The old 25 ids all survive the extension.
+  for (const id of ['lead-crown', 'research-flask', 'engineer-wrench', 'data-chart', 'writer-quill', 'default-bot']) {
+    assert.ok(ids.has(id), id)
+  }
   assert.ok(ids.has(DEFAULT_AVATAR_ID))
   assert.ok(ids.has(LEAD_AVATAR_ID))
   for (const preset of AVATAR_PRESETS) {
@@ -46,6 +50,24 @@ test('avatars: the longest keyword outranks more short hits', () => {
   assert.equal(matchAvatar({ name: '研究员', role: '文献调研' }).id, 'research-flask')
 })
 
+test('avatars: the SVG-library additions match their own roles', () => {
+  const probes = [
+    [{ name: '系统架构师', role: '架构设计' }, 'architect-stag'],
+    [{ name: '战略规划', role: '战略咨询' }, 'strategy-fox'],
+    [{ name: 'ESG', role: '可持续发展治理' }, 'esg-gaia'],
+    [{ name: '内部审计', role: '审计底稿' }, 'audit-panda'],
+    [{ name: '供应链管理', role: '采购物流' }, 'scm-cargo'],
+    [{ name: '智能体编排', role: '多智能体调度' }, 'agent-sylph'],
+    [{ name: '知识管理', role: '知识图谱' }, 'knowledge-tree'],
+    [{ name: '流程自动化', role: 'RPA 机器人流程自动化' }, 'rpa-mecha'],
+    [{ name: '趋势洞察', role: '竞争情报' }, 'insight-raven'],
+    [{ name: '创新孵化', role: '创新项目管理' }, 'innovation-orb'],
+  ]
+  for (const [identity, expected] of probes) {
+    assert.equal(matchAvatar(identity).id, expected, identity.name)
+  }
+})
+
 test('avatars: narrative, numeric and art roles land on their own presets', () => {
   assert.equal(matchAvatar({
     name: '剧情策划',
@@ -61,7 +83,9 @@ test('avatars: narrative, numeric and art roles land on their own presets', () =
   }).id, 'photo-camera')
   // A single Chinese character must never win: "主线" used to match lead-crown.
   assert.equal(matchAvatar({ name: 'x', role: '主线剧情' }).id, 'writer-quill')
-  assert.notEqual(matchAvatar({ name: 'x', role: '主线' }).id, 'lead-crown')
+  // "主线" has no keyword hit; this identity's hash fallback is not lead-crown,
+  // so landing on lead-crown would mean the old single-character rule came back.
+  assert.notEqual(matchAvatar({ name: 'y', role: '主线' }).id, 'lead-crown')
 })
 
 test('avatars: the nine cross-half probes agree with the client', () => {
@@ -75,7 +99,9 @@ test('avatars: the nine cross-half probes agree with the client', () => {
     [{ name: '剧情策划', role: '主线剧情与支线设计' }, 'writer-quill'],
     [{ name: '数值策划', role: '属性、公式、成长曲线与经济平衡的设计者' }, 'data-chart'],
     [{ name: '像素美工', role: '纯代码程序化像素美术，负责精灵与调色板' }, 'photo-camera'],
-    [{ name: '未知角色', role: '随便聊聊' }, 'data-chart'],
+    // Hash fallback over the 39 non-default presets; the client must use the
+    // same table and the same modulo to answer identically.
+    [{ name: '未知角色', role: '随便聊聊' }, 'field-otter'],
   ]
   for (const [identity, expected] of probes) {
     assert.equal(matchAvatar(identity).id, expected, identity.name)

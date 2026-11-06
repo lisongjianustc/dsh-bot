@@ -444,6 +444,40 @@ test('api: a turn that ends around an unreturned tool settles the tool part', as
   assert.match(tool.error, /本轮已结束|ended before this tool reported a result/)
 })
 
+test('api: avatar SVGs are served by id with the tile and transparent variants', async (t) => {
+  const host = makeHost(t)
+  const tile = streamResponse()
+  const tileDone = new Promise(resolve => tile.on('finish', resolve))
+  await host.route.handler(mockRequest({ method: 'GET', url: '/dsh-bot/api/avatar/lead-crown.svg' }), tile)
+  await tileDone
+  assert.equal(tile.status, 200)
+  assert.equal(tile.headers['content-type'], 'image/svg+xml; charset=utf-8')
+  assert.equal(tile.headers['x-content-type-options'], 'nosniff')
+  assert.match(tile.headers['cache-control'], /immutable/)
+  assert.match(tile.body().toString('utf8'), /<svg[\s>]/)
+
+  const transparent = streamResponse()
+  const transparentDone = new Promise(resolve => transparent.on('finish', resolve))
+  await host.route.handler(mockRequest({ method: 'GET', url: '/dsh-bot/api/avatar/architect-stag.svg?variant=transparent' }), transparent)
+  await transparentDone
+  assert.equal(transparent.status, 200)
+  assert.match(transparent.body().toString('utf8'), /<svg[\s>]/)
+
+  // Unknown ids and traversal attempts are 404s, never a filesystem read.
+  const unknown = await host.call('GET', '/avatar/no-such-avatar.svg')
+  assert.equal(unknown.status, 404)
+  assert.equal(unknown.body.code, 'invalid-request')
+  const encodedTraversal = await host.call('GET', '/avatar/..%2F..%2Fstate.json.svg')
+  assert.equal(encodedTraversal.status, 404)
+  const normalizedTraversal = await host.call('GET', '/avatar/../lead-crown.svg')
+  assert.equal(normalizedTraversal.status, 404)
+  const bogusVariant = streamResponse()
+  const bogusDone = new Promise(resolve => bogusVariant.on('finish', resolve))
+  await host.route.handler(mockRequest({ method: 'GET', url: '/dsh-bot/api/avatar/lead-crown.svg?variant=bogus' }), bogusVariant)
+  await bogusDone
+  assert.equal(bogusVariant.status, 200)
+})
+
 test('api: an upload is stored once and served back as a media stream', async (t) => {
   const host = makeHost(t)
   const bytes = Buffer.from('fake png bytes for the integration test')

@@ -11,7 +11,11 @@
  *
  * @module @lisongjianustc/dsh-bot/host/routes
  */
+import { createReadStream, existsSync, statSync } from 'node:fs'
+import { dirname, join, resolve, sep } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { MAX_UPLOAD_BYTES } from './attachments.js'
+import { isAvatarId } from './avatars.js'
 import { BotError, describeError, isBotError, statusForCode } from './errors.js'
 import { clip } from './util.js'
 
@@ -21,6 +25,13 @@ export const API_PREFIX = '/dsh-bot/api'
 export const BODY_LIMIT = 64 * 1024
 /** How many messages one page may carry at most. */
 export const MESSAGE_PAGE_MAX = 500
+
+/**
+ * The plugin package's own avatar assets. `import.meta.url` is this file's real
+ * path (a profile link installation resolves to the workspace package), so two
+ * levels up is the package root.
+ */
+const AVATAR_ASSETS_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', 'assets', 'avatars')
 
 const JSON_HEADERS = {
   'content-type': 'application/json; charset=utf-8',
@@ -124,6 +135,51 @@ function requireString(body, key) {
     throw new BotError('invalid-request', `the request needs a non-blank "${key}"`)
   }
   return value
+}
+
+/**
+ * Serve one avatar SVG from the packaged asset library.
+ *
+ * Only a known preset id can be requested: the id is whitelisted against the
+ * same table the matcher uses, and the resolved path must stay inside the
+ * chosen variant directory. Unknown ids and traversal attempts are a plain 404.
+ * @param {import('node:http').ServerResponse} res - the response.
+ * @param {URL} url - the parsed request URL.
+ * @param {string} path - the path suffix after `/dsh-bot/api`.
+ * @returns {boolean} whether the route answered.
+ */
+function serveAvatarAsset(res, url, path) {
+  const match = /^\/avatar\/([a-z0-9-]+)\.svg$/.exec(path)
+  if (match === null) return false
+  const id = match[1]
+  if (!isAvatarId(id)) {
+    refuse(res, 404, 'invalid-request', `no avatar preset has the id "${id}"`)
+    return true
+  }
+  const variant = url.searchParams.get('variant') === 'transparent' ? 'transparent' : 'tile'
+  const directory = join(AVATAR_ASSETS_ROOT, variant)
+  const file = join(directory, `${id}.svg`)
+  const root = resolve(directory) + sep
+  if (!resolve(file).startsWith(root) || !existsSync(file)) {
+    refuse(res, 404, 'invalid-request', `the ${variant} avatar asset for "${id}" is unavailable`)
+    return true
+  }
+  let size = 0
+  try {
+    size = statSync(file).size
+  } catch {
+    refuse(res, 404, 'invalid-request', `the ${variant} avatar asset for "${id}" is unavailable`)
+    return true
+  }
+  res.writeHead(200, {
+    'content-type': 'image/svg+xml; charset=utf-8',
+    'content-length': String(size),
+    'cache-control': 'public, max-age=31536000, immutable',
+    'x-content-type-options': 'nosniff',
+    'referrer-policy': 'no-referrer',
+  })
+  createReadStream(file).pipe(res)
+  return true
 }
 
 /**
@@ -545,6 +601,11 @@ export function registerRoutes({ ctx, store, services, runtime, hub, prompt, dis
         return
       }
       if (method === 'GET') {
+        if (path.startsWith('/avatar/')) {
+          if (serveAvatarAsset(res, url, path)) return
+          refuse(res, 404, 'invalid-request', `no route serves ${method} ${path}`)
+          return
+        }
         if (path === '/media') {
           const id = url.searchParams.get('id')
           if (id === null || id === '') throw new BotError('invalid-request', 'the media route needs an id')

@@ -372,6 +372,10 @@ function buildDemoMessages(state) {
         },
       ],
     }),
+    msg('chat_b7a1c9d3e5f2', 6, 'bot', '本周分工如下：\n\n| 角色 | 名字 | 职责 | 状态 |\n| :--- | :---: | :--- | ---: |\n| 总管 | **Chief** | 派活与验收 | `done` |\n| 架构 | 架构师 | 契约与评审 | `进行中` |\n| 文案 | 写手 | 文档与公告 | 2 篇 |', 'done', {
+      botId: chief.id,
+      sessionId: 'sess_demo_chief',
+    }),
   ]
   out['chat_2e6c8a4f0b1d'] = [
     msg('chat_2e6c8a4f0b1d', 1, 'user', '这个插件应该走 main 面板还是 shell.overlay？'),

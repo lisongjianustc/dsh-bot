@@ -1,4 +1,10 @@
-# Bot 头像库规格（v1）
+# Bot 头像库规格（v2：SVG 资源版）
+
+> v2 起头像外观来自 `assets/avatars/`：**40 个原创 SVG**（25 个原有 ID + 15 个新增角色），
+> 每个提供 `tile`（浅色圆角底板）与 `transparent`（透明底）两种变体；
+> Host 通过 `GET /dsh-bot/api/avatar/<id>.svg[?variant=transparent]` 提供，Client 用 `<img>` 渲染，
+> 资产 404/离线时回退到旧程序化 SVG。匹配逻辑与预设表仍是唯一事实来源（`src/host/avatars.js` / `src/client/avatar.js`），
+> 新增 15 条定义见 `assets/avatars/presets-additions.json`。
 
 目标：**内置头像库 + 自动匹配**。Bot 不需要人工挑头像；创建/更新时按「名字 + 角色 + 指令」的关键词从库里匹配最合适的头像；新增未知角色时也能落到一个不违和的兜底头像。用户仍可手动换一个（循环/网格选择）。
 

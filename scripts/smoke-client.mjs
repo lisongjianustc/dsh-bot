@@ -190,7 +190,12 @@ new Function('module', 'exports', 'require', avatarSource)(
   },
 )
 const avatarLib = avatarModule.exports
-check(avatarLib.PRESETS.length === 25, 'avatar library carries the 24 presets plus the fallback')
+check(avatarLib.PRESETS.length === 40, 'avatar library carries 40 presets (fallback last)')
+check(avatarLib.PRESETS[avatarLib.PRESETS.length - 1].id === 'default-bot', 'the fallback stays last in the preset table')
+check(avatarLib.imageUrl('architect-stag') === 'dsh-bot/api/avatar/architect-stag.svg', 'avatar tiles use the Host avatar route')
+check(avatarLib.matchAvatar({ name: '架构师', role: '系统架构师' }).id === 'architect-stag', '架构师 matches the architect avatar')
+check(avatarLib.matchAvatar({ name: '合规专员', role: '内控合规' }).id === 'compliance-officer', '合规专员 matches the compliance avatar')
+check(avatarLib.matchAvatar({ name: '知识管理', role: '知识库与知识图谱' }).id === 'knowledge-tree', '知识管理 matches the knowledge avatar')
 check(avatarLib.sha1('abc') === 'a9993e364706816aba3e25717850c26c9cd0d89d', 'avatar SHA-1 matches the Host hash')
 check(avatarLib.matchAvatar({ name: '剧情策划', role: '主线剧情与支线设计' }).id === 'writer-quill', '剧情策划 matches the writer avatar')
 check(avatarLib.matchAvatar({ name: '数值策划', role: '数值与平衡' }).id === 'data-chart', '数值策划 matches the data avatar')
@@ -300,6 +305,33 @@ const existingForm = renderToStaticMarkup(
 check(existingForm.includes('项目目录 / 工作区') && existingForm.includes('/Users/me/game-dev'), 'the group form lists the configured directories')
 check(existingForm.includes('主目录') && existingForm.includes('设为主目录'), 'the first directory is the main one and later ones can be promoted')
 check(existingForm.includes('移除目录') && existingForm.includes('添加文件夹…'), 'each directory can be removed and a folder can be added')
+const botFormHtml = renderToStaticMarkup(
+  React.createElement(panelsModule.BotForm, {
+    t: tFromBundle,
+    store: Object.assign({}, fakeStore, { data: null }),
+    onClose() {},
+    bot: {
+      id: 'bot_botform',
+      name: '架构师',
+      role: '系统架构师',
+      instructions: '',
+      color: '#4e83c8',
+      avatar: avatarLib.avatarById('architect-stag'),
+      permission: 'workspace-write',
+      autoHelper: true,
+      autoApprove: true,
+      isMain: false,
+      model: null,
+    },
+  }),
+)
+check(botFormHtml.includes('头像') && botFormHtml.includes('dsh-bot/api/avatar/architect-stag.svg'), 'the bot form previews the avatar tile')
+check(botFormHtml.includes('工作区') && botFormHtml.includes('自动匹配'), 'the bot form keeps its workspace select and avatar actions')
+const newBotFormHtml = renderToStaticMarkup(
+  React.createElement(panelsModule.BotForm, { t: tFromBundle, store: Object.assign({}, fakeStore, { data: null }), onClose() {} }),
+)
+check(newBotFormHtml.includes('新建机器人') || newBotFormHtml.includes('头像'), 'a new-bot form renders without an existing avatar')
+
 const freshForm = renderToStaticMarkup(
   React.createElement(panelsModule.GroupForm, {
     t: tFromBundle,
@@ -309,6 +341,41 @@ const freshForm = renderToStaticMarkup(
   }),
 )
 check(freshForm.includes('尚未选择目录') && freshForm.includes('添加工作区'), 'a new group starts with an empty directory list and the workspace picker')
+
+/* -------------------------------------------------------------- markdown */
+
+const markdown = loadClientModule('markdown.js')
+function mdBlockHtml(source) {
+  return renderToStaticMarkup(React.createElement('div', null, markdown.render(source)))
+}
+const tableHtml = mdBlockHtml('| 角色 | 职责 | 状态 |\n| :--- | :---: | ---: |\n| **Chief** | 派活 | `done` |\n| 架构师 | [设计](https://example.com) | 2 |')
+check(tableHtml.includes('db-md-table-wrap') && tableHtml.includes('<table'), 'a header + separator renders a table')
+check(tableHtml.includes('db-md-align-center') && tableHtml.includes('db-md-align-right'), 'table alignment markers become classes')
+check(tableHtml.includes('<strong>Chief</strong>') && tableHtml.includes('db-md-code-inline') && tableHtml.includes('db-md-link'), 'table cells keep inline formatting')
+check(!mdBlockHtml('a | b\nc | d').includes('<table'), 'lines without a separator stay a paragraph')
+check(!mdBlockHtml('| a | b |\n| --- | nope |').includes('<table'), 'a malformed separator does not create a table')
+const xssTable = mdBlockHtml('| <script>alert(1)</script> | x |\n| --- | --- |\n| [bad](javascript:alert(1)) | `<img>` |')
+check(!xssTable.includes('<script>') && !xssTable.includes('<img>'), 'markdown tables never inject raw HTML')
+check(xssTable.includes('javascript:alert(1)'), 'unsafe table links stay plain text')
+
+/* ----------------------------------------------------------------- avatars */
+
+const uiModule = loadClientModule('ui.js')
+const knownAvatar = renderToStaticMarkup(
+  React.createElement(uiModule.Avatar, { name: 'Architect', avatar: avatarLib.avatarById('architect-stag'), size: 'md' }),
+)
+check(knownAvatar.includes('src="dsh-bot/api/avatar/architect-stag.svg"'), 'a library avatar renders as an img tile')
+const unknownAvatar = renderToStaticMarkup(
+  React.createElement(uiModule.Avatar, {
+    name: 'Custom',
+    avatar: { kind: 'library', id: 'custom', motif: 'mystery', color: '#123456', background: '#ffffff' },
+    size: 'md',
+  }),
+)
+check(unknownAvatar.includes('<svg') && !unknownAvatar.includes('<img'), 'an unknown avatar id falls back to the programmatic SVG')
+const gridHtml = renderToStaticMarkup(React.createElement(panelsModule.AvatarGrid, { t: tFromBundle, avatarId: 'architect-stag' }))
+check((gridHtml.match(/class="db-avatar-choice(?: is-active)?"/g) || []).length === 40, 'the avatar picker renders 40 chooseable tiles')
+check((gridHtml.match(/dsh-bot\/api\/avatar\//g) || []).length === 40, 'every picker tile loads its Host SVG')
 
 /* ------------------------------------------------------------- stub cordis */
 
@@ -455,8 +522,8 @@ store.closeDrawer()
 
 // M3: library avatars render as SVG, the tasks tab groups tasks/helpers, and
 // the composer exposes the attachment entry point.
-check(html.includes('db-avatar-svg'), 'bot rosters render library avatars as SVG')
-check((html.match(/db-avatar-svg/g) || []).length >= 3, 'every demo bot gets an avatar')
+check(html.includes('db-avatar-img') && html.includes('dsh-bot/api/avatar/'), 'bot rosters render library avatars through the Host tile route')
+check((html.match(/db-avatar-img/g) || []).length >= 3, 'every demo bot gets an avatar image')
 check(html.includes('添加附件') || html.includes('db-input'), 'composer is present with its attachment entry point')
 
 store.openDrawer('tasks')

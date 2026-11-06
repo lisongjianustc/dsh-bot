@@ -1,0 +1,256 @@
+[
+  {
+    "id": "architect-stag",
+    "motif": "default",
+    "color": "#4e83c8",
+    "background": "#e8f2ff",
+    "intent": "系统架构师",
+    "zh": [
+      "架构",
+      "系统设计",
+      "技术架构"
+    ],
+    "en": [
+      "architect",
+      "architecture",
+      "system design"
+    ]
+  },
+  {
+    "id": "field-otter",
+    "motif": "default",
+    "color": "#d18a44",
+    "background": "#fbf0e2",
+    "intent": "现场运营",
+    "zh": [
+      "现场运营",
+      "一线协调",
+      "现场管理"
+    ],
+    "en": [
+      "field operations",
+      "on-site",
+      "field ops"
+    ]
+  },
+  {
+    "id": "risk-eagle",
+    "motif": "default",
+    "color": "#4868a6",
+    "background": "#e9effa",
+    "intent": "风险管理",
+    "zh": [
+      "风险管理",
+      "风险识别",
+      "风险评估"
+    ],
+    "en": [
+      "risk management",
+      "risk assessment",
+      "risk analysis"
+    ]
+  },
+  {
+    "id": "compliance-officer",
+    "motif": "default",
+    "color": "#d26f8f",
+    "background": "#fcecf2",
+    "intent": "内控合规",
+    "zh": [
+      "内控合规",
+      "制度合规",
+      "合规审查"
+    ],
+    "en": [
+      "compliance officer",
+      "internal control",
+      "regulatory"
+    ]
+  },
+  {
+    "id": "audit-panda",
+    "motif": "default",
+    "color": "#a67b5b",
+    "background": "#f5eee7",
+    "intent": "审计稽核",
+    "zh": [
+      "财务稽核",
+      "内部审计",
+      "审计底稿"
+    ],
+    "en": [
+      "internal audit",
+      "auditor",
+      "auditing"
+    ]
+  },
+  {
+    "id": "legaltech-dragon",
+    "motif": "default",
+    "color": "#518ed8",
+    "background": "#e8f5ff",
+    "intent": "法务科技",
+    "zh": [
+      "法律科技",
+      "合同智能审查",
+      "法务科技"
+    ],
+    "en": [
+      "legaltech",
+      "legal technology",
+      "contract ai"
+    ]
+  },
+  {
+    "id": "knowledge-tree",
+    "motif": "default",
+    "color": "#45a580",
+    "background": "#e7f7ee",
+    "intent": "知识管理",
+    "zh": [
+      "知识管理",
+      "知识库",
+      "知识图谱"
+    ],
+    "en": [
+      "knowledge management",
+      "knowledge base",
+      "knowledge graph"
+    ]
+  },
+  {
+    "id": "rpa-mecha",
+    "motif": "default",
+    "color": "#e4a04d",
+    "background": "#fcf2e2",
+    "intent": "流程自动化",
+    "zh": [
+      "流程自动化",
+      "机器人流程自动化",
+      "自动化脚本"
+    ],
+    "en": [
+      "rpa",
+      "robotic process automation",
+      "workflow automation"
+    ]
+  },
+  {
+    "id": "agent-sylph",
+    "motif": "default",
+    "color": "#9171d9",
+    "background": "#f2ecff",
+    "intent": "智能体编排",
+    "zh": [
+      "智能体编排",
+      "多智能体",
+      "智能体调度"
+    ],
+    "en": [
+      "agent orchestration",
+      "multi-agent",
+      "ai agent"
+    ]
+  },
+  {
+    "id": "scm-cargo",
+    "motif": "default",
+    "color": "#278db4",
+    "background": "#e5f7fc",
+    "intent": "供应链管理",
+    "zh": [
+      "供应链",
+      "采购物流",
+      "库存管理"
+    ],
+    "en": [
+      "supply chain",
+      "logistics supply",
+      "inventory management"
+    ]
+  },
+  {
+    "id": "esg-gaia",
+    "motif": "default",
+    "color": "#4aaf72",
+    "background": "#e7f9ec",
+    "intent": "ESG与可持续",
+    "zh": [
+      "esg",
+      "可持续发展治理",
+      "环境社会治理"
+    ],
+    "en": [
+      "esg",
+      "sustainability governance"
+    ]
+  },
+  {
+    "id": "strategy-fox",
+    "motif": "default",
+    "color": "#985b72",
+    "background": "#f8edf2",
+    "intent": "战略规划",
+    "zh": [
+      "战略规划",
+      "战略咨询",
+      "战略研究"
+    ],
+    "en": [
+      "strategic planning",
+      "strategy consultant",
+      "strategy"
+    ]
+  },
+  {
+    "id": "innovation-orb",
+    "motif": "default",
+    "color": "#da9a29",
+    "background": "#fff5d9",
+    "intent": "创新孵化",
+    "zh": [
+      "创新孵化",
+      "创新项目",
+      "创新管理"
+    ],
+    "en": [
+      "innovation lab",
+      "innovation management",
+      "ideation"
+    ]
+  },
+  {
+    "id": "insight-raven",
+    "motif": "default",
+    "color": "#5974a7",
+    "background": "#eaf0fb",
+    "intent": "趋势洞察",
+    "zh": [
+      "趋势洞察",
+      "行业洞察",
+      "竞争情报"
+    ],
+    "en": [
+      "insights",
+      "competitive intelligence",
+      "trend analysis"
+    ]
+  },
+  {
+    "id": "future-traveler",
+    "motif": "default",
+    "color": "#537cde",
+    "background": "#ebf1ff",
+    "intent": "未来探索",
+    "zh": [
+      "未来研究",
+      "未来趋势",
+      "前瞻研究"
+    ],
+    "en": [
+      "futures studies",
+      "futurist",
+      "foresight"
+    ]
+  }
+]

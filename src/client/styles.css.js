@@ -1514,8 +1514,54 @@ var CSS = `
 .db-settings-page .db-title { font-size: 14px; }
 .db-settings-actions { display: flex; gap: 8px; margin-block-start: 2px; }
 
+/* ------------------------------------------------------ markdown tables */
+
+.db-md-table-wrap {
+  margin-block: 8px;
+  max-inline-size: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 8px;
+}
+.db-md-table {
+  inline-size: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  line-height: 1.5;
+  background: var(--dsw-alias-bg-base);
+}
+.db-md-table th,
+.db-md-table td {
+  padding: 5px 9px;
+  border-block-end: 1px solid var(--dsw-alias-border-l1);
+  border-inline-end: 1px solid var(--dsw-alias-border-l1);
+  text-align: start;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+.db-md-table th:last-child,
+.db-md-table td:last-child { border-inline-end: 0; }
+.db-md-table tbody tr:last-child td { border-block-end: 0; }
+.db-md-table thead th {
+  background: color-mix(in srgb, var(--dsw-alias-label-secondary) 8%, transparent);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.db-md-table th.db-md-align-center,
+.db-md-table td.db-md-align-center { text-align: center; }
+.db-md-table th.db-md-align-right,
+.db-md-table td.db-md-align-right { text-align: end; }
+
 /* ------------------------------------------------------------ avatars */
 
+.db-avatar-img {
+  display: block;
+  inline-size: 100%;
+  block-size: 100%;
+  object-fit: cover;
+  border-radius: 26%;
+}
+.db-avatar.is-image { overflow: hidden; }
 .db-avatar.is-svg {
   background: transparent;
   box-shadow: none;

@@ -33,7 +33,7 @@ In DSH a Session *is* an Agent. dsh-bot does not invent a second execution layer
 | **Memory** | One store per Bot plus one shared by the team, selected into the next turn under a 6,000-character budget, with revision guards and a journal. |
 | **Schedules** | Daily / every-N / once, delivered by the Host schedule service to a Bot session. |
 | **Rich input** | Text, images and files like the native composer: paste, drag, picker; the Bot receives absolute paths and can read them. |
-| **Avatar library** | 24 built-in programmatic avatars; new Bots auto-match from name/role keywords (unknown roles fall back deterministically). |
+| **Avatar library** | 40 original SVG avatars; new Bots auto-match from name/role keywords (unknown roles fall back deterministically). |
 | **Usage** | Turns and characters per Bot over 7/30/90 days; workflow-level task panel. |
 | **Bilingual** | Chinese and English UI, notices and tool guidance. |
 | **Publish-ready** | 21 model-facing tools, `dsh.bundle` + `dsh.client`, market metadata, icon, locales, CI. |
@@ -99,7 +99,7 @@ Browser (client half)                      Host process (host half)
 
 - [x] Real-session Bots, private/group chats, memory, schedules, helpers, usage
 - [x] Group management tools + task dispatch (21/21 tool parity)
-- [x] Rich input (images/files), per-Bot workspace, avatar library, pinned chats
+- [x] Rich input (images/files), per-Bot workspace, 40-avatar SVG library, pinned chats
 - [ ] Multiple conversations per Bot
 - [ ] Reactions, HTML/Markdown previews, in-workbench approval cards
 - [ ] Task dependency review turns, usage detail
@@ -108,8 +108,8 @@ Browser (client half)                      Host process (host half)
 
 ```sh
 node scripts/build-client.mjs   # src/client/*.js -> lib/client.js
-node --test test/*.test.js      # 158 host tests
-node scripts/smoke-client.mjs   # 174 client checks
+node --test test/*.test.js      # 169 host tests
+node scripts/smoke-client.mjs   # 215 client checks
 node scripts/verify-live.mjs http://127.0.0.1:<port>   # live Host smoke
 ```
 
