@@ -92,7 +92,8 @@ Browser (client half)                      Host process (host half)
 | [docs/AVATAR-PROMPTS.md](docs/AVATAR-PROMPTS.md) | ChatGPT prompts for a consistent image-based avatar set |
 | [docs/PUBLISH.md](docs/PUBLISH.md) | dsh-market publishing checklist |
 
-![Bots & avatars](docs/screenshots/settings-bots-avatars.png)
+![Bots & avatars](docs/screenshots/avatar-grid.png)
+![Markdown tables](docs/screenshots/markdown-table.png)
 ![Tasks](docs/screenshots/settings-tasks.png)
 
 ## Roadmap

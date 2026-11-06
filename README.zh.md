@@ -91,7 +91,8 @@ node scripts/build-client.mjs
 | [docs/AVATAR-PROMPTS.md](docs/AVATAR-PROMPTS.md) | ChatGPT 图片头像提示词 |
 | [docs/PUBLISH.md](docs/PUBLISH.md) | dsh-market 发布清单 |
 
-![机器人头像](docs/screenshots/settings-bots-avatars.png)
+![机器人头像（40 个 SVG）](docs/screenshots/avatar-grid.png)
+![Markdown 表格](docs/screenshots/markdown-table.png)
 ![任务面板](docs/screenshots/settings-tasks.png)
 
 ## 路线图
