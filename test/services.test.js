@@ -295,6 +295,62 @@ test('services: an old bot without an avatar still renders one', async (t) => {
   void store
 })
 
+test('services: the main bot chat is pinned by default, the others are not', async (t) => {
+  const { services } = make(t)
+  const alice = await services.bots.create({ name: 'Alice' }) // first bot -> main
+  const bob = await services.bots.create({ name: 'Bob' })
+  assert.equal(services.chats.findDm(alice.id).pinned, true)
+  assert.equal(services.chats.findDm(bob.id).pinned, false)
+  const view = await services.stateView()
+  assert.equal(view.chats.find(chat => chat.botId === alice.id).pinned, true)
+  assert.equal(view.chats.find(chat => chat.botId === bob.id).pinned, false)
+})
+
+test('services: a chat can be pinned and unpinned, and mis-calls are refused', async (t) => {
+  const { services } = make(t)
+  const alice = await services.bots.create({ name: 'Alice' })
+  const bob = await services.bots.create({ name: 'Bob' })
+  const bobChat = services.chats.findDm(bob.id)
+  const pinned = await services.chats.setPinned(bobChat.id, true)
+  assert.equal(pinned.pinned, true)
+  assert.equal(services.chats.view(pinned).pinned, true)
+  const unpinned = await services.chats.setPinned(bobChat.id, false)
+  assert.equal(unpinned.pinned, false)
+  await assert.rejects(() => services.chats.setPinned('chat_nope', true), (error) => error.code === 'chat-not-found')
+  await assert.rejects(() => services.chats.setPinned(bobChat.id, 'yes'), (error) => error.code === 'invalid-request')
+  void alice
+})
+
+test('services: the chief-chat pin migration runs once and respects a manual unpin', async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-bot-pin-'))
+  t.after(() => rmSync(dir, { recursive: true, force: true }))
+  const ctx = { logger: { warn() {}, error() {} }, get() { return undefined } }
+  const first = createStore(ctx, { dir })
+  const services = createServices({ ctx, store: first })
+  const alice = await services.bots.create({ name: 'Alice' }) // main
+  const bob = await services.bots.create({ name: 'Bob' })
+  // Simulate a ledger written before pinning existed: main chat not pinned, no marker.
+  services.chats.findDm(alice.id).pinned = false
+  delete first.db.settings.pinMigrated
+  await first.save()
+  await first.close()
+
+  // Reopening runs the one-time migration and pins the chief chat.
+  const second = createStore(ctx, { dir })
+  const migrated = createServices({ ctx, store: second })
+  assert.equal(migrated.chats.findDm(alice.id).pinned, true)
+  assert.equal(second.db.settings.pinMigrated, true)
+  assert.equal(migrated.chats.findDm(bob.id).pinned, false)
+
+  // A manual unpin survives the next restart: the migration must not run again.
+  await migrated.chats.setPinned(migrated.chats.findDm(alice.id).id, false)
+  await second.close()
+  const third = createStore(ctx, { dir })
+  const reopened = createServices({ ctx, store: third })
+  assert.equal(reopened.chats.findDm(alice.id).pinned, false)
+  await third.close()
+})
+
 test('services: a bot may pin a DSH workspace by id', async (t) => {
   const workspace = { id: 'ws-user', title: 'My Project', path: '/tmp/project' }
   const registry = {

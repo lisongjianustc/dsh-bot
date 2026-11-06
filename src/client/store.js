@@ -1332,6 +1332,39 @@ function createStore() {
   }
 
   /**
+   * Pin or unpin one conversation (Host action `pin`).
+   *
+   * The list reorders immediately and rolls back when the Host refuses, so the
+   * pin control stays usable on a Host that has not shipped the action yet
+   * (its refusal is a plain 400 and the toast explains it).
+   */
+  function pinChat(chatId, pinned) {
+    var chat = chatById(chatId)
+    if (chat === undefined) return Promise.reject(new Error('chat-not-found'))
+    var next = pinned === undefined ? chat.pinned !== true : pinned === true
+    var previous = chat.pinned === true
+    if (previous === next) return Promise.resolve()
+    chat.pinned = next
+    notify()
+    if (store.mode === 'mock') return Promise.resolve()
+    return transport.post('chat', { action: 'pin', chatId: chatId, pinned: next }).then(
+      function (body) {
+        if (body !== null && typeof body === 'object') {
+          if (body.chat !== undefined) applyChat(body.chat)
+          else if (body.state !== undefined) applyState(body.state)
+        }
+        notify()
+      },
+      function (error) {
+        // Roll the optimistic flag back so the list order matches the Host.
+        chat.pinned = previous
+        notify()
+        throw error
+      },
+    )
+  }
+
+  /**
    * Ask the Host to run the last user turn again (Host action `retry`).
    * The reply arrives over the stream like any other turn.
    */
@@ -2237,6 +2270,7 @@ function createStore() {
   store.send = send
   store.uploadAttachment = uploadAttachment
   store.cancel = cancel
+  store.pinChat = pinChat
   store.retryChat = retryChat
   store.markRead = markRead
 

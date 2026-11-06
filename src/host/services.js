@@ -578,7 +578,8 @@ export function createServices({ ctx, config = {}, store }) {
         lastSeq: 0,
         updatedAt: now(),
         unread: 0,
-        pinned: false,
+        // The main/chief Bot is the workbench's default conversation.
+        pinned: bot.isMain === true,
       }
       db.chats.push(chat)
       await store.save()
@@ -640,6 +641,20 @@ export function createServices({ ctx, config = {}, store }) {
     },
     async read(chatId) {
       return chats.touch(chatId, { unread: 0 })
+    },
+    /**
+     * Pin or unpin one conversation.
+     * @param {string} ref - the chat id.
+     * @param {boolean} pinned - the new pin state.
+     * @returns {Promise<object>} the updated chat.
+     */
+    async setPinned(ref, pinned) {
+      if (typeof pinned !== 'boolean') throw new BotError('invalid-request', 'chat pinned must be a boolean')
+      const chat = chats.require(ref)
+      chat.pinned = pinned
+      chat.updatedAt = now()
+      await store.save()
+      return chat
     },
     /** What the panel renders for one chat: never the internal session map. */
     view(chat) {
@@ -1278,6 +1293,22 @@ export function createServices({ ctx, config = {}, store }) {
     return models === undefined ? view : { ...view, models }
   }
 
+  /**
+   * Pin every main Bot's private chat ONCE, for ledgers written before pinning
+   * existed. The flag is what makes it one-time: a user who unpins the chief
+   * chat afterwards keeps it unpinned across restarts.
+   */
+  const migratePinnedChats = () => {
+    if (db.settings.pinMigrated === true) return
+    for (const chat of db.chats) {
+      if (chat.kind !== 'dm') continue
+      const bot = db.bots.find(candidate => candidate.id === chat.botId)
+      if (bot !== undefined && bot.isMain === true) chat.pinned = true
+    }
+    db.settings.pinMigrated = true
+    void store.save().catch(error => log('warn', 'the pin migration could not be persisted', error))
+  }
+
   /** Give every stored Bot a renderable avatar; old records had none. */
   const backfillAvatars = async () => {
     let changed = false
@@ -1294,6 +1325,9 @@ export function createServices({ ctx, config = {}, store }) {
     running.clear()
     await store.close()
   }
+
+  // The pin migration is synchronous so the first state view already carries it.
+  migratePinnedChats()
 
   // The mount-time integrity pass: old avatars are filled and a message frozen
   // mid-stream by a crash is settled, without blocking the plugin's activation.

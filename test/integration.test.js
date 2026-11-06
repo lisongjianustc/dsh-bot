@@ -532,6 +532,44 @@ test('api: a bot can pin a workspace and its sessions are created there', async 
   assert.equal(rejected.body.code, 'workspace-unavailable')
 })
 
+test('api: a chat can be pinned through the route and the frame reaches SSE', async (t) => {
+  const host = makeHost(t)
+  const alice = (await host.call('POST', '/bot', { body: { action: 'create', bot: { name: 'Alice' } } })).body.state.bots[0]
+  const bob = (await host.call('POST', '/bot', { body: { action: 'create', bot: { name: 'Bob' } } })).body.state.bots[1]
+  const bobChat = (await host.call('GET', '/state')).body.state.chats.find(chat => chat.botId === bob.id)
+  assert.equal(bobChat.pinned, false)
+  // The chief chat is pinned on creation.
+  assert.equal((await host.call('GET', '/state')).body.state.chats.find(chat => chat.botId === alice.id).pinned, true)
+
+  // Open the event stream first, so the pin frame can be observed.
+  const stream = mockResponse()
+  const finished = new Promise(resolve => stream.on('finish', resolve))
+  await host.route.handler(mockRequest({ method: 'GET', url: '/dsh-bot/api/events' }), stream)
+  const pinned = await host.call('POST', '/chat', { body: { action: 'pin', chatId: bobChat.id, pinned: true } })
+  assert.equal(pinned.status, 200)
+  assert.equal(pinned.body.ok, true)
+  assert.equal(pinned.body.chat.pinned, true)
+  assert.equal(pinned.body.state.chats.find(chat => chat.id === bobChat.id).pinned, true)
+  // The hub published a `chat` frame for the change.
+  const frames = stream.chunks.join('').split('\n\n').filter(Boolean)
+    .map(line => { try { return JSON.parse(line.replace(/^data: /, '')) } catch { return undefined } })
+    .filter(Boolean)
+  const frame = frames.find(entry => entry.type === 'chat' && entry.chat?.id === bobChat.id)
+  assert.ok(frame, 'a chat frame carried the pin change')
+  assert.equal(frame.chat.pinned, true)
+
+  const unpinned = await host.call('POST', '/chat', { body: { action: 'pin', chatId: bobChat.id, pinned: false } })
+  assert.equal(unpinned.body.chat.pinned, false)
+  const bad = await host.call('POST', '/chat', { body: { action: 'pin', chatId: bobChat.id, pinned: 'yes' } })
+  assert.equal(bad.status, 400)
+  assert.equal(bad.body.code, 'invalid-request')
+  // An unknown conversation is a named refusal.
+  const missing = await host.call('POST', '/chat', { body: { action: 'pin', chatId: 'chat_nope', pinned: true } })
+  assert.equal(missing.status, 404)
+  assert.equal(missing.body.code, 'chat-not-found')
+  void finished
+})
+
 test('api: a bot carries autoApprove and the panel can switch it off', async (t) => {
   const host = makeHost(t)
   const created = await host.call('POST', '/bot', { body: { action: 'create', bot: { name: 'Alice' } } })

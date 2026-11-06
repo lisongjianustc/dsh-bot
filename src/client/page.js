@@ -79,7 +79,7 @@ function ChatRow(props) {
     'button',
     {
       type: 'button',
-      className: 'db-chat' + (selected ? ' is-active' : ''),
+      className: 'db-chat' + (selected ? ' is-active' : '') + (conversation.pinned === true ? ' is-pinned' : ''),
       onClick: function () {
         store.selectChat(conversation.id)
       },
@@ -108,6 +108,9 @@ function ChatRow(props) {
       h(
         'span',
         { className: 'db-chat-line' },
+        conversation.pinned === true
+          ? h('span', { className: 'db-pin-mark', title: t('left.pinned'), 'aria-hidden': 'true' }, h(Icon, { name: 'pin', size: 10 }))
+          : null,
         h('span', { className: 'db-chat-name' }, title),
         running === undefined ? null : h('span', { className: 'db-spinner', style: { width: '9px', height: '9px', borderWidth: '1.5px' } }),
         conversation.unread > 0 ? h('span', { className: 'db-unread' }, String(conversation.unread)) : null,
@@ -195,17 +198,38 @@ function LeftColumn(props) {
     ),
   ]
 
+  // With no filter, pinned conversations of both kinds share one section at
+  // the top, so a pinned group is not buried under the direct chats. The
+  // per-kind filters keep their usual section (pinned ones sort first inside
+  // it, which `filteredChats` already guarantees).
+  var pinnedChats = []
+  var plainDm = []
+  var plainGroup = []
+  for (var pc = 0; pc < chats.length; pc += 1) {
+    if (chats[pc].pinned === true) pinnedChats.push(chats[pc])
+    else if (chats[pc].kind === 'group') plainGroup.push(chats[pc])
+    else plainDm.push(chats[pc])
+  }
+
   var list = []
-  if (store.filter !== 'group' && dmChats.length > 0) {
-    list.push(h('div', { key: 'dm-label', className: 'db-section-label' }, t('left.dmSection')))
-    for (var d = 0; d < dmChats.length; d += 1) {
-      list.push(h(ChatRow, { key: dmChats[d].id, t: t, store: store, chat: dmChats[d] }))
+  if (store.filter === 'all' && pinnedChats.length > 0) {
+    list.push(h('div', { key: 'pinned-label', className: 'db-section-label db-section-pinned' }, t('left.pinnedSection')))
+    for (var p = 0; p < pinnedChats.length; p += 1) {
+      list.push(h(ChatRow, { key: pinnedChats[p].id, t: t, store: store, chat: pinnedChats[p] }))
     }
   }
-  if (store.filter !== 'dm' && groupChats.length > 0) {
+  var sectionDm = store.filter === 'all' ? plainDm : dmChats
+  var sectionGroup = store.filter === 'all' ? plainGroup : groupChats
+  if (store.filter !== 'group' && sectionDm.length > 0) {
+    list.push(h('div', { key: 'dm-label', className: 'db-section-label' }, t('left.dmSection')))
+    for (var d = 0; d < sectionDm.length; d += 1) {
+      list.push(h(ChatRow, { key: sectionDm[d].id, t: t, store: store, chat: sectionDm[d] }))
+    }
+  }
+  if (store.filter !== 'dm' && sectionGroup.length > 0) {
     list.push(h('div', { key: 'group-label', className: 'db-section-label' }, t('left.groupSection')))
-    for (var g = 0; g < groupChats.length; g += 1) {
-      list.push(h(ChatRow, { key: groupChats[g].id, t: t, store: store, chat: groupChats[g] }))
+    for (var g = 0; g < sectionGroup.length; g += 1) {
+      list.push(h(ChatRow, { key: sectionGroup[g].id, t: t, store: store, chat: sectionGroup[g] }))
     }
   }
   if (list.length === 0) {

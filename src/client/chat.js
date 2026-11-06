@@ -1116,6 +1116,17 @@ function ChatPane(props) {
         'div',
         { className: 'db-chat-head-actions' },
         h(ui.IconButton, {
+          icon: 'pin',
+          label: chat.pinned === true ? t('chat.unpin') : t('chat.pin'),
+          title: chat.pinned === true ? t('chat.unpin') : t('chat.pin'),
+          active: chat.pinned === true,
+          onClick: function () {
+            store.pinChat(chat.id, chat.pinned !== true).catch(function (failure) {
+              store.flash(transport.describeError(t, failure), 'error')
+            })
+          },
+        }),
+        h(ui.IconButton, {
           icon: 'users',
           label: t('groups.title'),
           title: t('groups.title'),

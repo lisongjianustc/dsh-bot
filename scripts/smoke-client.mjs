@@ -224,6 +224,41 @@ check(html.includes('db-chat-head'), 'workspace renders the selected chat header
 check(html.includes('db-composer'), 'workspace renders the composer')
 check(!html.includes('[PASS]'), 'pass messages are hidden from the timeline')
 
+// Pinning: Chief is pinned in the demo snapshot, so it leads the list and
+// carries the pin marker; pinning another chat moves it ahead of Chief.
+const listStart = html.indexOf('db-list')
+const listEnd = html.indexOf('db-left-foot')
+const listHtml = listStart >= 0 && listEnd > listStart ? html.slice(listStart, listEnd) : html
+check(listHtml.includes('is-pinned'), 'the pinned chat row has its pinned style')
+check(listHtml.includes('db-pin-mark'), 'the pinned chat row shows a pin marker')
+check(listHtml.indexOf('Chief') < listHtml.indexOf('架构师'), 'the pinned chat sorts before unpinned chats')
+check(typeof store.pinChat === 'function', 'the store exposes pinChat')
+await store.pinChat('chat_9d3f5b7a1c2e', true)
+check(store.chatById('chat_9d3f5b7a1c2e').pinned === true, 'pinChat pins the chat optimistically')
+html = render(mainReg.component, face)
+const pinnedStart = html.indexOf('db-list')
+const pinnedEnd = html.indexOf('db-left-foot')
+const pinnedList = pinnedStart >= 0 && pinnedEnd > pinnedStart ? html.slice(pinnedStart, pinnedEnd) : html
+check(pinnedList.indexOf('写手') < pinnedList.indexOf('架构师'), 'a newly pinned chat sorts ahead of unpinned chats')
+check(pinnedList.includes('置顶') && pinnedList.indexOf('置顶') < pinnedList.indexOf('私聊'), 'pinned chats get their own section above the kind sections')
+await store.pinChat('chat_9d3f5b7a1c2e', false)
+check(store.chatById('chat_9d3f5b7a1c2e').pinned !== true, 'pinChat unpins the chat again')
+
+store.setFilter('group')
+html = render(mainReg.component, face)
+const groupStart = html.indexOf('db-list')
+const groupEnd = html.indexOf('db-left-foot')
+const groupList = groupStart >= 0 && groupEnd > groupStart ? html.slice(groupStart, groupEnd) : html
+check(groupList.includes('产品小队') && !groupList.includes('架构师'), 'the group filter keeps only group chats')
+store.setFilter('dm')
+html = render(mainReg.component, face)
+const dmStart = html.indexOf('db-list')
+const dmEnd = html.indexOf('db-left-foot')
+const dmList = dmStart >= 0 && dmEnd > dmStart ? html.slice(dmStart, dmEnd) : html
+check(dmList.includes('架构师') && !dmList.includes('产品小队'), 'the direct filter keeps only direct chats')
+store.setFilter('all')
+html = render(mainReg.component, face)
+
 for (const tab of ['general', 'bots', 'groups', 'tasks', 'memory', 'schedules', 'usage']) {
   store.openDrawer(tab)
   await sleep(90)
@@ -570,6 +605,7 @@ const liveMessages = [
 
 const fetchCalls = []
 let failNextBot = false
+let failNextPin = false
 
 function jsonResponse(body, status = 200) {
   return Promise.resolve({
@@ -614,6 +650,16 @@ globalThis.fetch = (url, init = {}) => {
     return jsonResponse({ ok: true, state: liveState })
   }
   if (path.includes('/chat')) {
+    if (action === 'pin') {
+      if (failNextPin) {
+        failNextPin = false
+        return jsonResponse({ ok: false, code: 'invalid-request', message: 'unknown chat action "pin"' }, 400)
+      }
+      const target = liveState.chats.find((chat) => chat.id === body.chatId)
+      if (target === undefined) return jsonResponse({ ok: false, code: 'chat-not-found', message: 'no chat' }, 404)
+      target.pinned = body.pinned === true
+      return jsonResponse({ ok: true, chat: target })
+    }
     if (action === 'send') return jsonResponse({ ok: true, state: liveState, chat: liveState.chats[0] })
     if (action === 'read') return jsonResponse({ ok: true, chat: Object.assign({}, liveState.chats[1], { unread: 0 }) })
     if (action === 'retry') return jsonResponse({ ok: true, state: liveState, chat: liveState.chats[0] })
@@ -737,6 +783,20 @@ const liveAttachmentMessage = await store.send('chat_111111111111', '请看图',
 const attachmentCall = fetchCalls.filter((call) => call.path.includes('/chat') && call.body !== undefined && Array.isArray(call.body.attachments)).pop()
 check(attachmentCall !== undefined && attachmentCall.body.attachments[0] === 'att_live_1', 'chat send carries the attachment ids')
 check(store.messagesOf('chat_111111111111').list.some((message) => Array.isArray(message.parts) && message.parts.some((part) => part.type === 'image')), 'the optimistic message keeps the image part')
+
+await store.pinChat('chat_222222222222', true)
+const pinCall = fetchCalls.filter((call) => call.path.includes('/chat') && call.body !== undefined && call.body.action === 'pin').pop()
+check(pinCall !== undefined && pinCall.body.pinned === true, 'pinChat posts action "pin" with the new state')
+check(store.chatById('chat_222222222222').pinned === true, 'the Host answer keeps the chat pinned')
+failNextPin = true
+let pinError
+try {
+  await store.pinChat('chat_222222222222', false)
+} catch (error) {
+  pinError = error
+}
+check(pinError !== undefined && pinError.code === 'invalid-request', 'a refused pin surfaces its Host error')
+check(store.chatById('chat_222222222222').pinned === true, 'a refused pin rolls the optimistic flag back')
 
 const liveGroupResult = await store.clearGroupNote('grp_live')
 check(liveGroupResult.cleared === false, 'clearGroupNote reports when the Host ignores noteEntries')

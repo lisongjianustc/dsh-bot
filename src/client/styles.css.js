@@ -179,6 +179,12 @@ var CSS = `
   padding: 2px 8px 10px;
 }
 
+.db-section-label.db-section-pinned {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--dsw-alias-brand-primary);
+}
 .db-section-label {
   padding: 10px 7px 4px;
   font-size: 11px;
@@ -206,6 +212,24 @@ var CSS = `
 .db-chat.is-active {
   background: color-mix(in srgb, var(--dsw-alias-brand-primary) 13%, transparent);
   border-color: color-mix(in srgb, var(--dsw-alias-brand-primary) 26%, transparent);
+}
+.db-chat.is-pinned:not(.is-active) {
+  background: color-mix(in srgb, var(--dsw-alias-brand-primary) 5%, transparent);
+}
+.db-chat.is-pinned::before {
+  content: '';
+  position: absolute;
+  inset-block: 7px;
+  inset-inline-start: 0;
+  inline-size: 2px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--dsw-alias-brand-primary) 55%, transparent);
+}
+.db-pin-mark {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  color: var(--dsw-alias-brand-primary);
 }
 
 .db-chat-main { flex: 1; min-inline-size: 0; }

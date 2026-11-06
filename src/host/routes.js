@@ -276,6 +276,15 @@ export function registerRoutes({ ctx, store, services, runtime, hub, prompt, dis
       void runtime.retry(chat.id).catch((error) => log('warn', 'a retried turn failed', error))
       return await stateReply({ chat: services.chats.view(chat) })
     }
+    if (action === 'pin') {
+      const chat = services.chats.require(requireString(body, 'chatId'))
+      if (typeof body.pinned !== 'boolean') throw new BotError('invalid-request', '"pinned" must be a boolean')
+      const updated = await services.chats.setPinned(chat.id, body.pinned)
+      const view = services.chats.view(updated)
+      hub?.publish?.({ type: 'chat', chat: view })
+      await broadcastState()
+      return await stateReply({ chat: view })
+    }
     if (action === 'read') {
       const chat = services.chats.require(requireString(body, 'chatId'))
       await services.chats.read(chat.id)

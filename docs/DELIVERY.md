@@ -120,6 +120,12 @@
 **验收数字**：Host 单测 **143/143**；Client build `11 modules -> lib/client.js (372,135 bytes)`、smoke **137 项全过**；真实 Host `verify-live.mjs` **7/7**。
 **截图**：`docs/screenshots/{chat-attachments-tools,composer-attachments,settings-bots-avatars,settings-tasks}.png`。
 
+### 1.13 v0.3.1：对话置顶（HOST 147 / CLIENT 151）
+
+- **Host**：`services.chats.setPinned` + `POST /chat {action:'pin',chatId,pinned}`（校验 boolean、hub `chat` 帧 + broadcastState、返回 `{ok,state,chat}`）；`ensureDm` 主 Bot 默认 `pinned:true`；一次性迁移 `pinMigrated`（迁移后手动取消不会被重启覆盖）。
+- **Client**：列表「置顶」分组（跨私聊/群聊统一置顶区，图钉 + 品牌色竖条 + 浅底）；聊天头部图钉按钮（置顶/取消，乐观更新+失败回滚+toast）；SSE `chat` 帧同步。
+- **验收**：真实 Host 迁移后 Chief `pinned=true`；API pin/unpin Alice 正常；GUI 截图 `docs/screenshots/pinned-chats.png`（置顶区 Chief + 图钉，头部「置顶」标记）。测试 147/147、smoke 151、`verify-live` 7/7。
+
 ## 3. 安装与验收步骤
 
 ### 3.1 全新安装

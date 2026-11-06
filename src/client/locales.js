@@ -46,6 +46,7 @@ const zh = {
   'left.toggle': '显示会话列表',
   'left.noMatch': '没有匹配的会话',
   'left.pinned': '置顶',
+  'left.pinnedSection': '置顶',
 
   // Center / chat
   'chat.loading': '正在读取会话…',
@@ -67,6 +68,8 @@ const zh = {
   'chat.copy': '复制',
   'chat.copied': '已复制',
   'chat.quote': '引用',
+  'chat.pin': '置顶会话',
+  'chat.unpin': '取消置顶',
   'chat.quoted': '引用',
   'chat.quoteRemove': '取消引用',
   'chat.memberCount': '{count} 位成员',
@@ -446,6 +449,7 @@ const en = {
   'left.toggle': 'Show chat list',
   'left.noMatch': 'No matching chats',
   'left.pinned': 'Pinned',
+  'left.pinnedSection': 'Pinned',
 
   'chat.loading': 'Loading conversation…',
   'chat.empty': 'Pick a chat on the left, or just say something',
@@ -466,6 +470,8 @@ const en = {
   'chat.copy': 'Copy',
   'chat.copied': 'Copied',
   'chat.quote': 'Quote',
+  'chat.pin': 'Pin conversation',
+  'chat.unpin': 'Unpin conversation',
   'chat.quoted': 'Quote',
   'chat.quoteRemove': 'Remove quote',
   'chat.memberCount': '{count} members',
