@@ -1,0 +1,107 @@
+# dsh-bot 交付说明（M1 里程碑）
+
+> 日期：2026-11-06 · 环境：DSH 0.2.2-rc.1 / desktop profile / GUI http://127.0.0.1:59493（重启后）
+> 形态：A 融合版（每个 Bot = 真实 DSH 会话，挂专用 workspace，可回原生聊天）· 中心页面板 · Bot 会话可见 · 目标按 dsh-market 发布
+
+## 1. 已完成并验证
+
+### 1.1 安装/加载
+- `plugin_manager install_bundle`（target=`dsh-bot/`）→ `application: applied`；profile 为 **link 安装**（`@lisongjianustc/dsh-bot 0.1.0 <- dsh-bot`），`patchReload: live`。
+- 侧栏出现「机器人」入口；`main` 面板渲染三栏工作台（Bot/会话列表 · 聊天 · 设置抽屉）。
+- Client bundle：`node scripts/build-client.mjs` → 10 modules → `lib/client.js`（约 281 KB，`window.__ModuleLoader__` 包装，`node --check` 通过）。
+
+### 1.2 真实回合（已实测）
+- 创建 Chief Bot → 私聊发「你好，介绍一下你自己」→ **真实 Agent 回合**跑完（约 4s），消息流式落账本，`session-d227ebe7-…` 创建，`usage.jsonl` 有记录。
+- 模型钉死：给 Bot 设 `deepseek-official/deepseek-v4-pro + high` 后，下一轮会话日志 `request/header` 证明真实走了该路由，且**部署默认模型未被污染**（前后一致）。
+- 权限钉死：`permission/preset` 事件链正确（create 默认 workspace-write → Bot 设为 danger-full-access）。
+
+### 1.3 群聊（已实测）
+- 3 个 Bot 的「研发群」讨论：Chief(hop1) → @Alice/@Bob → Alice(hop2) → Bob(hop3) → @Alice/@Chief → Alice(hop4) → **hop 上限 4 触发 system notice** → Alice **收敛回合(hop5)** 收口。
+- @提及、接力、handover、group note（5 条 noteEntries）、每成员独立 session 全部工作。
+
+### 1.4 记忆（已实测）
+- `POST /api/memory {remember, scope:'team'}` 后下一轮 Bot 会话的 `user/message` 开头即 `<dsh-bot-memory>`，包含该条目（含 pinned）；预算/敏感信息/revision 逻辑有单测。
+
+### 1.5 定时任务（已实测）
+- `POST /api/schedule {timing:{kind:'once',minutes:1}}` → 原生 `schedule-768d7102-…`（`after_seconds:60`，target=该 Bot 会话）；**60 秒后真实触发**：`source:{kind:'schedule'}` user message → 自动跑 turn → 回复落成 DM 消息。
+- 删除路径已修（`schedule.edit({action:'delete'})`），失败保留本地记录可重试。
+
+### 1.6 测试
+- Host 单测：`node --test test/*.test.js` → **85 pass / 0 fail**（账本/记忆/提及/群调度/运行时/工具/路由集成）。
+- Client smoke：`node scripts/smoke-client.mjs` → 80+ 项（注册/渲染/markdown+XSS/真实 Host 形状）。
+
+### 1.7 重启后复验（2026-11-06 17:0x，新 GUI 端口 59493，全新进程）
+- `node scripts/verify-live.mjs http://127.0.0.1:59493` → **7/7 PASS**：`/state`、models 可选降级、`/messages`、`/usage`、`/memory list`、`/schedule list`、SSE 首帧 state。
+- 账本保持：3 Bot（Chief/Alice/Bob）、4 chat（3 私聊 + 研发群）、群备注、1 条定时记录（投影已修正为 `once`）。
+- GUI：侧栏「机器人」→ 工作台三栏正常；Markdown 粗体/有序列表/行内 code 渲染正确；发送消息 → 真实回合完成；工具行显示 `bot_list_team`（**已知 bug：完成态仍显示"运行中"，待 Host 修**）；设置抽屉 6 tab 正常（用量 13 回合 / 2845 字符）；「打开原生会话」跳转 DSH 原生会话成功；群备注展示正常。
+- 截图：`docs/screenshots/{workspace-panel,chat-markdown,settings-group}.png`。
+- 结论：旧代残留 / 挂起 turn / M0 探针侧栏行均随重启清除；新代码通过 `ctx.effect` 管理路由与工具注册，profile 热重载不再撞 duplicate。
+
+## 2. 已修的关键问题
+
+| # | 问题 | 修法 |
+|---|---|---|
+| 1 | 路由/工具注册未绑定 ctx.effect → profile reload 时新行激活撞旧注册，`application: failed` | `src/index.js` 把 `registerTools` / `registerRoutes` 包进 `ctx.effect`（重载先释放再注册） |
+| 2 | `prompt` 缺 AbortSignal 崩溃 | 全部调用点传 `AbortSignal` |
+| 3 | 一个 turn 多条 `assistant/message` 被拆成多条消息 | runtime 按 `turn/step` 归并 |
+| 4 | schedule `once` 状态投影成 daily | `scheduleView` 兼容 once/after/every/interval |
+| 5 | 单条原生 schedule 删除用不存在的 API → 泄漏 | 改用 `schedule.edit({action:'delete'})` |
+| 6 | Markdown 不渲染（`**bold**` 原样） | client 新增零依赖 `markdown.js`（React 元素输出，XSS 安全） |
+| 7 | 一键创建/首屏加载偶发卡住 | 写请求 35s 超时 + 看门狗 + state.lastSeq 对账 + 读失败重试按钮 |
+| 8 | 页面 SSE 常驻占连接 | 改为「打开面板才启动」 |
+
+### 1.8 M2/M3 复验（2026-11-06 17:1x · 新代码热加载后）
+
+**Host 半（111/111 单测）**
+- 审批 answerer 实测：Bot `Wanda` 设 `permission:'workspace-write'` + `autoApprove:true`，让它写工作区外 `/tmp/wanda-approval.txt` 并在沙箱拒绝后带 `sandbox_permissions` 重试 → **不再 150s 挂起**，两条 `bash` 工具均为 `ok`，文件真实写入，消息 `done`。
+- tool part 修复实测：新回合 `tool/result` 用 `data.message.toolCallId` 匹配，`bot_list_team` 等工具行终态为 `ok`（历史旧消息仍保留 running，属修复前数据）。
+- 后台 helper 全链路实测：Chief 调 `bot_start_helper` → 立即回执「已受理」→ `state.helpers` 出现 `helper_ae499d…`（status `done`，childId 指向隐藏子会话）→ 原 chat 收到 `[后台任务「…」· done]` relay → **Chief 自动起验收回合**核对报告（并纠正了子任务里一处 `ERANGE`→`ERESOLVE` 笔误）。
+- 新契约实测：`schedule action:'update'`（标题/触发替换、nativeId 更新）；`group update {noteEntries:[]}` 清空群备注；`bots[].autoApprove` 读写。
+- 修掉 daily 定时时区格式坑：Host 要求 `HH:mm:ss`，面板/模型说 `HH:mm` → `nativeTimingOf` 现在补 `:00`。
+
+**Client 半（301,341 bytes，113 项 smoke）**
+- markdown/流式/工具行（running→未确认防御）/打开原生会话/三栏布局/群备注/定时 native 状态/机器人表单（头像+8 色+自动批准）/用量 7/30/90 均在真实 GUI 验收通过。
+
+**测试数据清理**：删除测试 Bot（Wanda）、临时群（清理测试群）、测试定时任务；保留 Chief/Alice/Bob 与研发群。
+
+### 1.9 最终验收（2026-11-06 17:2x）
+
+- `node scripts/build-client.mjs` → `10 modules -> lib/client.js (301341 bytes)`；`node --check` OK。
+- `node scripts/smoke-client.mjs` → 全部通过（6 effects registered）。
+- `node scripts/verify-live.mjs http://127.0.0.1:59493` → **7/7 PASS**（schedules count 0，测试数据已清理）。
+- `node --test test/*.test.js` → **111/111 pass**。
+- Host API 契约补测：`schedule action:'update'`（标题/触发替换 + nativeId 更新）、`group update {noteEntries:[]}` 清空备注、`bots[].autoApprove` 读写、daily 时间 `HH:mm` → 原生 `HH:mm:ss` 归一化，全部实测通过。
+- 注意：本机装了 `sidebar-panel-fold` 面板折叠插件，当「机器人」不是最近使用面板时会收进侧栏「更多」菜单（截图确认仍在）；这是该折叠插件的行为，不是本插件丢失。查找入口：更多 → 机器人。
+- 测试数据清理：Wanda Bot、清理测试群、测试定时任务已删除；保留 Chief / Alice / Bob 与研发群。被删 Bot 的原生 DSH 会话仍留在 `dsh-bot` workspace（可手动归档），这是 M1 已知限制。
+
+## 3. 安装与验收步骤
+
+### 3.1 全新安装
+1. 确保 DSH Desktop 已退出并重新打开（清理旧模块代际，见 §4）。
+2. 用 `plugin_manager install_bundle` 指向本目录绝对路径，或用 npm 包安装（发布后 `dsh plugin add @lisongjianustc/dsh-bot`）。
+3. GUI 侧栏点「机器人」→ 空态点「一键创建默认 Bot」→ 发第一条消息。
+
+### 3.2 本地开发循环
+```bash
+cd dsh-bot
+node scripts/build-client.mjs        # 改 src/client/** 后必须
+node --test test/*.test.js           # Host 单测
+node scripts/smoke-client.mjs        # Client smoke
+```
+改 **Client**：重新 build 后刷新页面（client-modules 会按 bundle mtime 更新）；若页面仍加载旧 bundle，用 Plugins 页对该 bundle 关/开一次或重启 Desktop。
+改 **Host**：row 重载后生效；若出现 duplicate route / duplicate tool 错误，重启 Desktop 一次（模块代际限制，见 M0 findings §0/§10）。
+
+## 4. 已知限制（M1 范围）
+
+- **后台 helper / subagent 任务、审批 answerer、附件/头像上传、reactions、媒体预览**：按分期 M4 未做（工具面与数据模型已预留）。
+- Bot 会话在 DSH 侧栏可见（设计如此，挂 `dsh-bot` workspace）；旧代 client row 在卸载 bundle 后可能残留到重启。
+- 群聊 hop 上限的 system notice 目前英文；可按 settings.language 本地化（一行）。
+- `ask` 权限 + 无人值守 = 审批挂起（实测）；因此 Bot 默认 `danger-full-access`。需要沙箱时必须配 answerer（`{global:true, prepend:true}`，要么作答要么 `next()`）。
+- 重启 Desktop 会清掉挂起 turn 与旧注册；这是当前唯一"干净重来"手段。
+
+## 5. 下一步（M2–M4）
+
+1. M2：工作台私聊体验打磨（消息重试/编辑、群 note UI、附件）。
+2. M3：后台 helper（`subagents` 隐藏子会话 + 任务条）、审批 answerer（配置开关）。
+3. M4：外观/头像库/reactions/媒体预览；用量图表完善；中文 system notice。
+4. 发布：按 `docs/PUBLISH.md` 提 dsh-market PR。

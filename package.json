@@ -1,0 +1,62 @@
+{
+  "name": "@lisongjianustc/dsh-bot",
+  "version": "0.2.0",
+  "description": "MiniMax-Bot-style always-on agent team for the DeepSeek Harness Web GUI: named Bots backed by real DSH sessions, private and group chats, memory, background jobs, scheduled tasks, and usage.",
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./client": "./lib/client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "src",
+    "lib",
+    "cordis.patch.yml",
+    "icon.svg",
+    "locale/*.json",
+    "README.md",
+    "README.zh.md",
+    "docs"
+  ],
+  "dsh": {
+    "engines": {
+      "dsh": ">=0.2.2-rc.1"
+    },
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-layout",
+        "@deepseek-ai/dsh-client-ui-sidebar",
+        "@deepseek-ai/dsh-client-ui-slots"
+      ]
+    }
+  },
+  "keywords": [
+    "dsh-plugin",
+    "dsh",
+    "agent-team",
+    "bots"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lisongjianustc/dsh-bot"
+  },
+  "scripts": {
+    "build": "node scripts/build-client.mjs",
+    "test": "node --test test/*.test.js"
+  },
+  "devDependencies": {},
+  "icon": "icon.svg",
+  "homepage": "https://github.com/lisongjianustc/dsh-bot#readme",
+  "bugs": {
+    "url": "https://github.com/lisongjianustc/dsh-bot/issues"
+  }
+}

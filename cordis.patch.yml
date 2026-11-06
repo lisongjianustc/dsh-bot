@@ -1,0 +1,7 @@
+# Bundle patch for the dsh-bot plugin.
+# One host-half row owns the bot ledger, its /dsh-bot/api routes, the bot-team
+# system-prompt section and the model-facing bot tools. The row id stays in this
+# package's own namespace; a shared id silently loses to another bundle.
+- insert:
+    - id: dsh-bot
+      name: '@lisongjianustc/dsh-bot'
