@@ -22,6 +22,9 @@ export const TOOL_NAMES = [
   'bot_create',
   'bot_update',
   'bot_delete',
+  'bot_create_group',
+  'bot_update_group',
+  'bot_delete_group',
   'bot_message',
   'bot_post_group',
   'bot_remember',
@@ -102,10 +105,23 @@ export function registerTools({ ctx, services, dispatcher, runtime }) {
     return bot === undefined || bot.autoHelper !== false
   }
 
+  /** The model-facing projection of one group. */
+  const groupView = (group) => ({
+    id: group.id,
+    name: group.name,
+    adminId: group.adminId ?? '',
+    memberIds: [...(group.memberIds ?? [])],
+    notice: group.notice ?? '',
+    replyMode: group.replyMode ?? 'admin',
+    maxHops: group.maxHops ?? 0,
+    handover: group.handover === true,
+    useNote: group.useNote === true,
+  })
+
   const tools = [
     defineTool({
       name: 'bot_list_team',
-      description: 'List every Bot and group of this Bot team, with the caller\'s own identity. Read-only.',
+      description: 'List every Bot and group of this Bot team, with the caller\'s own identity. Group rows carry the admin, the member ids and the reply mode, which is what you need before updating one. Read-only.',
       parameters: schema({}),
       execute: (_args, exec) => {
         const caller = callerOf(exec)
@@ -205,6 +221,90 @@ export function registerTools({ ctx, services, dispatcher, runtime }) {
         }
         await services.bots.remove(bot)
         return { ok: true, deleted: bot.id, name: bot.name }
+      },
+    }),
+    defineTool({
+      name: 'bot_create_group',
+      description: 'Create a group chat with the named Bots. Main Bot only. members accept Bot ids or names (at least one); you join automatically, and the admin defaults to you and always ends up a member. The group gets a real chat immediately. Chinese: 建群/拉群/组建群聊.',
+      parameters: schema({
+        name: STRING('group name, at most 24 characters, unique, no @ or line break'),
+        members: { type: 'array', items: { type: 'string' }, description: 'bot ids or names, at least one' },
+        admin: STRING('admin bot id or name; defaults to you, and must be a member'),
+        notice: STRING('group notice shown to every member, at most 500 characters'),
+        reply_mode: { type: 'string', enum: ['admin', 'all'], description: 'admin = only the admin answers first; all = every member gets a turn' },
+        max_hops: { type: 'number', description: 'relay hop limit 0..20; 0 means no limit' },
+        handover: BOOLEAN('hand the previous reply conclusion to the next speaker'),
+        use_note: BOOLEAN('keep a short group note of what each round concluded'),
+      }, ['name', 'members']),
+      async execute(args, exec) {
+        const caller = requireMain(callerOf(exec))
+        const refs = Array.isArray(args.members) ? args.members.map(ref => String(ref)) : []
+        if (refs.length === 0) throw new BotError('invalid-request', 'a group needs at least one member')
+        if (!refs.includes(caller.id) && services.bots.get(caller.id) !== undefined) refs.push(caller.id)
+        const group = await services.groups.create({
+          name: args.name,
+          memberIds: refs,
+          adminId: args.admin ?? caller.id,
+          notice: args.notice,
+          replyMode: args.reply_mode,
+          maxHops: args.max_hops,
+          handover: args.handover,
+          useNote: args.use_note,
+        })
+        return { ok: true, group: groupView(group) }
+      },
+    }),
+    defineTool({
+      name: 'bot_update_group',
+      description: 'Change a group: name, members, notice, reply mode and relay rules. The main Bot or this group admin may update it; only the main Bot may change the admin. Replacing members resolves ids or names, dedupes them, and keeps the admin a member. Chinese: 改群/群设置/拉人/踢人.',
+      parameters: schema({
+        group: STRING('group id or name'),
+        name: STRING('new group name'),
+        members: { type: 'array', items: { type: 'string' }, description: 'replacement member list (bot ids or names); omitted keeps the current members' },
+        admin: STRING('new admin bot id or name; main Bot only'),
+        notice: STRING('new group notice'),
+        reply_mode: { type: 'string', enum: ['admin', 'all'] },
+        max_hops: { type: 'number', description: 'relay hop limit 0..20' },
+        handover: BOOLEAN('hand the previous reply conclusion to the next speaker'),
+        use_note: BOOLEAN('keep a short group note of what each round concluded'),
+      }, ['group']),
+      async execute(args, exec) {
+        const caller = callerOf(exec)
+        const group = services.groups.require(args.group)
+        if (caller.isMain !== true && group.adminId !== caller.id) {
+          throw new BotError('invalid-request', 'only the main bot or this group admin may update it')
+        }
+        if (args.admin !== undefined && caller.isMain !== true) {
+          throw new BotError('invalid-request', 'only the main bot may change the group admin')
+        }
+        const patch = {}
+        if (args.name !== undefined) patch.name = args.name
+        if (args.notice !== undefined) patch.notice = args.notice
+        if (args.reply_mode !== undefined) patch.replyMode = args.reply_mode
+        if (args.max_hops !== undefined) patch.maxHops = args.max_hops
+        if (args.handover !== undefined) patch.handover = args.handover
+        if (args.use_note !== undefined) patch.useNote = args.use_note
+        if (args.admin !== undefined) patch.adminId = args.admin
+        if (args.members !== undefined) {
+          const refs = Array.isArray(args.members) ? args.members.map(ref => String(ref)) : []
+          if (refs.length === 0) throw new BotError('invalid-request', 'a group needs at least one member')
+          patch.memberIds = refs
+        }
+        if (Object.keys(patch).length === 0) throw new BotError('invalid-request', 'the update changes nothing')
+        const updated = await services.groups.update(group.id, patch)
+        return { ok: true, group: groupView(updated) }
+      },
+    }),
+    defineTool({
+      name: 'bot_delete_group',
+      description: 'Delete one group with its chat and messages. Main Bot only. Chinese: 删群/解散群.',
+      parameters: schema({ group: STRING('group id or name') }, ['group']),
+      async execute(args, exec) {
+        requireMain(callerOf(exec))
+        const group = services.groups.get(args.group)
+        if (group === undefined) throw new BotError('group-not-found', `no group matches "${args.group}"`)
+        await services.groups.remove(group)
+        return { ok: true, deleted: group.id, name: group.name }
       },
     }),
     defineTool({
@@ -516,3 +616,4 @@ export function registerTools({ ctx, services, dispatcher, runtime }) {
 
 /** A short announcement the prompt can use, listing exactly the registered names. */
 export const BOT_TOOL_GUIDANCE = TOOL_NAMES.join(', ')
+  + ' 中文触发：建群 / 拉群 / 改群设置 / 群聊 / 派活 / 定时任务 / 团队记忆。'

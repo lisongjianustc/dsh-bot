@@ -133,7 +133,7 @@ ID 规则：`bot_<12hex>`、`grp_<12hex>`、`chat_<12hex>`、`msg_<12hex>`、`no
 
 ## 7. 模型可见工具（M1 先注册最小集，M4 补齐）
 
-`bot_list_team`、`bot_create`、`bot_update`、`bot_delete`、`bot_message`、`bot_post_group`、`bot_remember`、`bot_recall`、`bot_forget`、`bot_create_schedule`、`bot_list_schedules`、`bot_delete_schedule`、`bot_start_helper`、`bot_list_helpers`、`bot_stop_helper`。全部用**裸 ToolDefinition** 注册（`{name,description,parameters:JSONSchema,output:{schema,render},execute}`，不 import `@deepseek-ai/dsh-tools`），`execute(args, exec)` 用 `exec.agent.id` 认 caller；仅对 Bot 会话可见：`ctx.tools.register(def, { when: ({agent}) => services.bots.botOfSession(agent?.id) !== undefined })`。
+`bot_list_team`、`bot_create`、`bot_update`、`bot_delete`、`bot_create_group`、`bot_update_group`、`bot_delete_group`、`bot_message`、`bot_post_group`、`bot_remember`、`bot_recall`、`bot_forget`、`bot_create_schedule`、`bot_list_schedules`、`bot_delete_schedule`、`bot_start_helper`、`bot_list_helpers`、`bot_stop_helper`。全部用**裸 ToolDefinition** 注册（`{name,description,parameters:JSONSchema,output:{schema,render},execute}`，不 import `@deepseek-ai/dsh-tools`），`execute(args, exec)` 用 `exec.agent.id` 认 caller；仅对 Bot 会话可见：`ctx.tools.register(def, { when: ({agent}) => services.bots.botOfSession(agent?.id) !== undefined })`。
 
 ## 8. M0 事实（platform probe 已确认 / 待补充）
 

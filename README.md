@@ -8,6 +8,7 @@ Create named Bots, chat with them one-on-one, pull them into groups, give them s
 
 - **Bots are real sessions.** Each Bot runs in an ordinary DSH Session, grouped in a dedicated `dsh-bot` workspace. Open it from the workbench (or the sidebar) and you get the full native chat: tool cards, approvals, queue, search.
 - **Private chats** with a Bot: every message is one real Agent turn.
+- **Group management by the Bot itself**: the main Bot can create, update and delete groups, pick members/admins, and post into any group without joining it (`bot_create_group` / `bot_update_group` / `bot_delete_group` / `bot_post_group`).
 - **Group chats** with `@Name` mentions, admin/all reply modes, `[PASS]` skipping, a hop limit with a wrap-up turn, optional handover of the previous conclusion, and a group note that survives clearing the chat.
 - **Memory**: one store per Bot plus one shared by the team, selected into the next turn under a 6,000-character budget, guarded by revisions and a journal.
 - **Background jobs**: hidden child sessions for work that should not block the chat; a report is posted back into the conversation and the Bot verifies it in its own words (`bot_start_helper` / `bot_list_helpers` / `bot_stop_helper`).

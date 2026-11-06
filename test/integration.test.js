@@ -310,7 +310,7 @@ test('plugin entry: hard dependencies and one API route', (t) => {
   assert.equal(host.routes[0].path, '/dsh-bot/api')
   assert.equal(host.sections.length, 1)
   assert.equal(host.sections[0].name, 'dsh-bot:bot-persona')
-  assert.equal(host.tools.length, 15)
+  assert.equal(host.tools.length, 18)
 })
 
 test('plugin entry: approval answerers are registered prepended and global', (t) => {

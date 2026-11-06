@@ -94,14 +94,20 @@ test('services: group validation keeps the admin a member', async (t) => {
   const { services } = make(t)
   const alice = await services.bots.create({ name: 'Alice' })
   const bob = await services.bots.create({ name: 'Bob' })
-  await assert.rejects(
-    () => services.groups.create({ name: 'Team', memberIds: [alice.id], adminId: bob.id }),
-    (error) => error.code === 'invalid-request',
-  )
+  // An admin named outside the members is added, so the group is never headless.
+  const auto = await services.groups.create({ name: 'Auto', memberIds: [alice.id], adminId: bob.id })
+  assert.deepEqual(auto.memberIds, [bob.id, alice.id])
+  assert.equal(auto.adminId, bob.id)
   await assert.rejects(
     () => services.groups.create({ name: 'Team', memberIds: ['bot_missing'] }),
     (error) => error.code === 'bot-not-found',
   )
+  await assert.rejects(
+    () => services.groups.create({ name: 'Team', memberIds: [alice.id], adminId: 'Nobody' }),
+    (error) => error.code === 'bot-not-found',
+  )
+  const byName = await services.groups.create({ name: 'ByName', memberIds: ['Alice', '@Bob', bob.id] })
+  assert.deepEqual(byName.memberIds, [alice.id, bob.id])
   const group = await services.groups.create({ name: 'Team', memberIds: [alice.id, bob.id], maxHops: 99, useNote: true })
   assert.equal(group.maxHops, 20)
   assert.equal(group.replyMode, 'admin')

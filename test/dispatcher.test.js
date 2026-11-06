@@ -209,6 +209,30 @@ test('dispatcher: message_bot drives the target bot and returns its answer', asy
   assert.equal(relay.text, 'check the build')
 })
 
+test('dispatcher: postGroup follows the main-bot cross-group rule', async (t) => {
+  const { services, runtime, dispatcher } = make(t)
+  const alice = await services.bots.create({ name: 'Alice' }) // main
+  const bob = await services.bots.create({ name: 'Bob' })
+  const carol = await services.bots.create({ name: 'Carol' })
+  const group = await services.groups.create({ name: 'Inner', memberIds: [bob.id], adminId: bob.id })
+  // The main Bot may open a discussion in a group it does not belong to.
+  runtime.replies.push({ text: 'Bob replies to the chief' })
+  const round = await dispatcher.postGroup({ callerBotId: alice.id, group: group.id, text: 'discuss this' })
+  assert.ok(round)
+  assert.equal(runtime.sent.length, 1)
+  assert.equal(runtime.sent[0].botId, bob.id)
+  // A member Bot may post to its own group...
+  runtime.replies.push({ text: 'Bob again' })
+  await dispatcher.postGroup({ callerBotId: bob.id, group: 'Inner', text: 'follow up' })
+  assert.equal(runtime.sent.length, 2)
+  // ...but a non-member Bot may not, and the main-only exception does not leak.
+  await assert.rejects(
+    () => dispatcher.postGroup({ callerBotId: carol.id, group: 'Inner', text: 'let me in' }),
+    (error) => error.code === 'invalid-request',
+  )
+  assert.equal(runtime.sent.length, 2)
+})
+
 test('dispatcher: a bot cannot message itself', async (t) => {
   const { services, dispatcher } = make(t)
   const alice = await services.bots.create({ name: 'Alice' })

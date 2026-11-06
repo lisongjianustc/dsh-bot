@@ -368,7 +368,9 @@ export function createDispatcher({ ctx, services, runtime }) {
   const postGroup = async ({ callerBotId, group: groupRef, text }) => {
     const caller = services.bots.require(callerBotId)
     const group = services.groups.require(groupRef)
-    if (!group.memberIds.includes(caller.id)) {
+    // MiniMax Bot's rule: the main/chief Bot may open a discussion in any group
+    // it is not a member of; every other Bot only talks in its own groups.
+    if (caller.isMain !== true && !group.memberIds.includes(caller.id)) {
       throw new BotError('invalid-request', `bot "${caller.name}" is not a member of "${group.name}"`)
     }
     const body = String(text ?? '').trim()

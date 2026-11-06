@@ -38,6 +38,9 @@ export const BOT_TOOL_NAMES = [
   'bot_create',
   'bot_update',
   'bot_delete',
+  'bot_create_group',
+  'bot_update_group',
+  'bot_delete_group',
   'bot_message',
   'bot_post_group',
   'bot_remember',
@@ -159,16 +162,22 @@ export function briefFor({ bot, bots, groups, group, settings, note }) {
   lines.push(`- bot_list_team → ${zh ? '列出 Bot 与群' : 'list Bots and groups'}`)
   if (bot.isMain) {
     lines.push(`- bot_create / bot_update / bot_delete → ${zh ? '增删改 Bot（仅主 Bot）' : 'create, update, delete a Bot (main only)'}`)
+    lines.push(`- bot_create_group / bot_update_group / bot_delete_group → ${zh ? '建群 / 改群 / 删群；成员写 id 或名字（仅主 Bot）' : 'create, update, delete a group; members are ids or names (main only)'}`)
     lines.push(`- bot_create_schedule / bot_list_schedules / bot_delete_schedule → ${zh ? '管理定时任务' : 'manage scheduled tasks'}`)
   } else {
     lines.push(`- bot_create_schedule / bot_list_schedules → ${zh ? '你自己的定时任务' : 'your own scheduled tasks'}`)
+    if (group !== undefined && group !== null && group.adminId === bot.id) {
+      lines.push(`- bot_update_group → ${zh ? '改这个群的设置（你是群主）' : 'change this group (you are its admin)'}`)
+    }
   }
   lines.push(`- bot_message → ${zh ? '给另一个 Bot 发一条任务消息' : 'send a task message to another Bot'}`)
   if (bot.autoHelper !== false) {
     lines.push(`- bot_start_helper / bot_list_helpers / bot_stop_helper → ${zh ? '起一个隐藏会话的后台 helper，稍后回投报告并由你验收' : 'start a hidden-session background helper, then verify its report when it comes back'}`)
   }
   if (group === undefined || group === null) {
-    lines.push(`- bot_post_group → ${zh ? '把讨论请求发到一个群（仅私聊可用）' : 'post a discussion request to a group (private chat only)'}`)
+    lines.push(bot.isMain
+      ? `- bot_post_group → ${zh ? '把讨论请求发到任意群（主 Bot 不必在群里；仅私聊可用）' : 'post a discussion request to any group (the main bot need not be a member; private chat only)'}`
+      : `- bot_post_group → ${zh ? '把讨论请求发到你所在的群（仅私聊可用）' : 'post a discussion request to a group you are in (private chat only)'}`)
   }
   lines.push(`- bot_remember / bot_recall / bot_forget → ${zh ? '读写共享记忆与自己的记忆' : 'read and write shared and own memory'}`)
   lines.push(zh

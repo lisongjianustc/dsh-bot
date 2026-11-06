@@ -103,7 +103,23 @@ function modelPin(input) {
   return { provider, model, ...(reasoningEffort === undefined ? {} : { reasoningEffort }) }
 }
 
-/** One group draft as the panel sends it. */
+/**
+ * Resolve one Bot reference: an id, a name, or `@name`.
+ * @param {object[]} bots - the roster.
+ * @param {unknown} ref - the reference.
+ * @returns {string | undefined} the Bot id, or undefined when nothing matches.
+ */
+function resolveBotRef(bots, ref) {
+  const raw = String(ref ?? '').trim()
+  if (raw === '') return undefined
+  const key = raw.replace(/^@/, '')
+  const byId = bots.find(bot => bot.id === key)
+  if (byId !== undefined) return byId.id
+  const byName = bots.find(bot => bot.name.toLowerCase() === key.toLowerCase())
+  return byName?.id
+}
+
+/** One group draft as the panel sends it (member/admin refs may be ids or names). */
 function groupDraft(input, bots) {
   if (typeof input !== 'object' || input === null || Array.isArray(input)) {
     throw new BotError('invalid-request', 'a group draft must be an object')
@@ -112,16 +128,27 @@ function groupDraft(input, bots) {
   if (name === '') throw new BotError('invalid-request', 'a group needs a name')
   if (name.length > NAME_MAX) throw new BotError('invalid-request', `a group name holds at most ${NAME_MAX} characters`)
   if (name.includes('@') || /[\r\n]/.test(name)) throw new BotError('invalid-request', 'a group name cannot contain @ or a line break')
-  const memberIds = [...new Set((Array.isArray(input.memberIds) ? input.memberIds : []).map(id => String(id)))]
-  for (const id of memberIds) {
-    if (!bots.some(bot => bot.id === id)) throw new BotError('bot-not-found', `the group names bot ${id}, which does not exist`)
+  const refs = [
+    ...(Array.isArray(input.memberIds) ? input.memberIds : []),
+  ]
+  const memberIds = []
+  for (const ref of refs) {
+    const id = resolveBotRef(bots, ref)
+    if (id === undefined) throw new BotError('bot-not-found', `the group names bot "${String(ref)}", which does not exist`)
+    if (!memberIds.includes(id)) memberIds.push(id)
   }
-  const adminId = input.adminId === undefined || input.adminId === null || input.adminId === ''
-    ? (memberIds[0] ?? '')
-    : String(input.adminId)
-  if (adminId !== '' && !memberIds.includes(adminId)) {
-    throw new BotError('invalid-request', 'the group admin must be one of its members')
+  const adminRef = input.adminId
+  let adminId = ''
+  if (adminRef !== undefined && adminRef !== null && String(adminRef).trim() !== '') {
+    const resolved = resolveBotRef(bots, adminRef)
+    if (resolved === undefined) throw new BotError('bot-not-found', `the group admin "${String(adminRef)}" does not exist`)
+    adminId = resolved
+  } else {
+    adminId = memberIds[0] ?? ''
   }
+  // The admin always stays a member: Auto-add makes this write idempotent and
+  // keeps a members-replacement from orphaning the admin silently.
+  if (adminId !== '' && !memberIds.includes(adminId)) memberIds.unshift(adminId)
   const replyMode = input.replyMode === undefined ? 'admin' : String(input.replyMode)
   if (!REPLY_MODES.includes(replyMode)) throw new BotError('invalid-request', 'a group reply mode is admin or all')
   const maxHops = Math.max(0, Math.min(HOP_LIMIT_MAX, Math.floor(Number(input.maxHops) || 0)))

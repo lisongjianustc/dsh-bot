@@ -65,7 +65,7 @@ test('tools: the registered names match the prompt announcement exactly', async 
   const { captured } = make(t)
   assert.deepEqual(captured.map(entry => entry.definition.name), TOOL_NAMES)
   assert.deepEqual(TOOL_NAMES, BOT_TOOL_NAMES)
-  assert.equal(TOOL_NAMES.length, 15)
+  assert.equal(TOOL_NAMES.length, 18)
 })
 
 test('tools: every definition has the bare ToolDefinition shape and a working renderer', async (t) => {
@@ -170,6 +170,81 @@ test('tools: message_bot and post_group delegate to the dispatcher', async (t) =
   await services.chats.setSession(groupChat.id, alice.id, { sessionId: 'session-group-alice' })
   const refused = await postTool.execute({ group: group.id, message: 'discuss' }, { agent: { id: 'session-group-alice' } })
   assert.equal(refused.ok, false)
+})
+
+test('tools: group tools enforce the permission matrix and resolve names', async (t) => {
+  const { captured, services } = make(t)
+  const alice = await services.bots.create({ name: 'Alice' }) // main
+  const bob = await services.bots.create({ name: 'Bob' })
+  const carol = await services.bots.create({ name: 'Carol' })
+  for (const bot of [alice, bob, carol]) {
+    const chat = services.chats.findDm(bot.id)
+    await services.chats.setSession(chat.id, bot.id, { sessionId: `session-${bot.name.toLowerCase()}` })
+  }
+  const tool = (name) => captured.find(entry => entry.definition.name === name).definition
+  const createGroup = tool('bot_create_group')
+  const updateGroup = tool('bot_update_group')
+  const deleteGroup = tool('bot_delete_group')
+
+  // Only the main Bot creates a group.
+  const deniedCreate = await createGroup.execute({ name: 'Denied', members: [alice.id] }, { agent: { id: 'session-bob' } })
+  assert.equal(deniedCreate.ok, false)
+  assert.equal(deniedCreate.code, 'invalid-request')
+
+  // Names and ids mix, the caller joins automatically, the admin defaults to the caller.
+  const created = await createGroup.execute({ name: 'Task Group', members: ['Bob', carol.id] }, { agent: { id: 'session-alice' } })
+  assert.equal(created.ok, true)
+  assert.equal(created.group.adminId, alice.id)
+  assert.deepEqual([...created.group.memberIds].sort(), [alice.id, bob.id, carol.id].sort())
+  assert.equal(created.group.replyMode, 'admin')
+  assert.ok(services.chats.findGroupChat(created.group.id))
+
+  // An unknown member is a named refusal, not a crash.
+  const unknown = await createGroup.execute({ name: 'Nope', members: ['Nobody'] }, { agent: { id: 'session-alice' } })
+  assert.equal(unknown.ok, false)
+  assert.equal(unknown.code, 'bot-not-found')
+
+  // An explicit admin outside the members list is added.
+  const administered = await createGroup.execute({ name: 'Admin Group', members: ['Bob'], admin: 'Carol' }, { agent: { id: 'session-alice' } })
+  assert.equal(administered.ok, true)
+  assert.equal(administered.group.adminId, carol.id)
+  assert.ok(administered.group.memberIds.includes(carol.id))
+  assert.ok(administered.group.memberIds.includes(alice.id))
+
+  // The main Bot may rewrite members and move the admin.
+  const updated = await updateGroup.execute({
+    group: created.group.id,
+    name: 'Renamed',
+    members: ['Bob'],
+    admin: 'Bob',
+    reply_mode: 'all',
+    max_hops: 3,
+  }, { agent: { id: 'session-alice' } })
+  assert.equal(updated.ok, true)
+  assert.equal(updated.group.name, 'Renamed')
+  assert.deepEqual(updated.group.memberIds, [bob.id])
+  assert.equal(updated.group.adminId, bob.id)
+  assert.equal(updated.group.replyMode, 'all')
+  assert.equal(updated.group.maxHops, 3)
+
+  // The group admin may change settings, but never the admin.
+  const byAdmin = await updateGroup.execute({ group: 'Renamed', notice: 'hello' }, { agent: { id: 'session-bob' } })
+  assert.equal(byAdmin.ok, true)
+  assert.equal(byAdmin.group.notice, 'hello')
+  const adminChange = await updateGroup.execute({ group: 'Renamed', admin: 'Carol' }, { agent: { id: 'session-bob' } })
+  assert.equal(adminChange.ok, false)
+  assert.equal(adminChange.code, 'invalid-request')
+
+  // A non-admin member cannot update the group.
+  const byMember = await updateGroup.execute({ group: 'Renamed', notice: 'x' }, { agent: { id: 'session-carol' } })
+  assert.equal(byMember.ok, false)
+
+  // Only the main Bot deletes a group.
+  const deniedDelete = await deleteGroup.execute({ group: 'Renamed' }, { agent: { id: 'session-bob' } })
+  assert.equal(deniedDelete.ok, false)
+  const deleted = await deleteGroup.execute({ group: 'Renamed' }, { agent: { id: 'session-alice' } })
+  assert.equal(deleted.ok, true)
+  assert.equal(services.groups.get('Renamed'), undefined)
 })
 
 test('tools: helper tools report a receipt and enforce ownership', async (t) => {

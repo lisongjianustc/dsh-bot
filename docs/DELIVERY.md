@@ -74,6 +74,28 @@
 - 注意：本机装了 `sidebar-panel-fold` 面板折叠插件，当「机器人」不是最近使用面板时会收进侧栏「更多」菜单（截图确认仍在）；这是该折叠插件的行为，不是本插件丢失。查找入口：更多 → 机器人。
 - 测试数据清理：Wanda Bot、清理测试群、测试定时任务已删除；保留 Chief / Alice / Bob 与研发群。被删 Bot 的原生 DSH 会话仍留在 `dsh-bot` workspace（可手动归档），这是 M1 已知限制。
 
+### 1.10 群管理工具补齐（v0.2.1，2026-11-06 21:0x）
+
+**问题**：Chief 只有 `bot_create/update/delete`（管 Bot），没有群管理工具，无法按任务自动组建群聊。
+**对照 MiniMax Bot（21 个工具）补齐**：
+
+| 操作 | main Bot | 群 admin（非 main） | 普通成员 | 非成员 |
+|---|---|---|---|---|
+| `bot_create_group` | ✅（caller 自动入群，admin 默认 caller） | ❌ | ❌ | ❌ |
+| `bot_update_group` | ✅（含改 admin/换成员） | ✅ 名称/公告/reply_mode/hop/handover/note；改 admin ❌ | ❌ | ❌ |
+| `bot_delete_group` | ✅（级联删群 chat/消息） | ❌ | ❌ | ❌ |
+| `bot_post_group` | ✅ **任意群，无需入群** | ✅ 自己的群 | ✅ 自己的群 | ❌ |
+
+- `members` 支持 bot id / 名字 / `@名字`，大小写不敏感、去重；admin 自动补进成员，替换成员不会让群变成无主。
+- 工具面 15 → **18**；全部裸 ToolDefinition、仅 `node:*` import、工具名一次定死。
+- 单测 **113 pass**（新增群工具权限矩阵、名字解析、post_group 三条权限分支）。
+
+**真实 Host 验收**：
+- Chief 一句话建群 → `发布小组`（Chief admin + Alice/Bob，公告、maxHops=3、reply_mode=admin 全部落实，返回 `grp_96cfb77edfb7`）；Chief 还主动纠正了它上一轮"建不了群"的旧回答。
+- `bot_post_group` 跨群权限：建一个 Chief 不在的「外部协作群」（admin=Alice），让 Chief 发讨论 → 工具 `ok`，relay 进入该群，Alice 回复进度。验证后临时群已删除。
+
+**与 MiniMax Bot 21 工具的差距（剩余 3 个）**：`dispatch_tasks`（批量派单，1..32 条，带 request_id 幂等）、`get_tasks`（按 task/batch 查询，支持 wait_ms 与结果分页）、`cancel_tasks`（取消任务/批次及依赖）。这三个属于"任务调度器 + 依赖图 + 回执幂等"能力，建议作为下一阶段（M4）实现，其余 18 个已对齐。
+
 ## 3. 安装与验收步骤
 
 ### 3.1 全新安装
