@@ -141,6 +141,16 @@
 - **存量自动头像重算**：挂载时对所有 `avatarAuto !== false` 的 Bot 重匹配并落盘。实测用户已建的「剧情策划→writer-quill、数值策划→data-chart、开发→engineer-wrench、像素美工→photo-camera」全部纠正；显式指定头像不变。
 - 数字：Host **158/158**、smoke **174 项**、真实 Host 页面自更新验收通过。
 
+### 1.15 v0.3.3：修复群组编辑白屏
+
+- **现象**：设置抽屉 → 群组 → 点编辑，整个面板白屏；控制台 `ReferenceError: role is not defined at GroupForm`。
+- **根因**：`GroupForm` 里残留了一段从 Bot 表单复制过来的头像预览代码（`identity`/`previewAvatar`/`cycleAvatar`，引用了 GroupForm 不存在的 `role`/`instructions`/`bot`/`avatarId`），渲染即抛错；主面板没有错误边界，于是一处崩溃整个页面空白。
+- **修复**：
+  1. 删除 GroupForm 中残留的 Bot 表单代码块；
+  2. 新增 `ui.ErrorBoundary` 并包住 SettingsDrawer：任何单个表单再出错只显示「这个面板出错了 + 重试」，不再白屏（其他页面不受影响）；
+  3. 补 zh/en 文案 `error.panelCrashed` / `action.retry`。
+- **验收**：真实 GUI 点「群组 → 编辑」正常渲染编辑表单（群名/管理员/成员复选/回复模式/保存/删除）；点保存成功（API state 确认 admin/replyMode/maxHops 未变）；控制台无错误；build 386,358 bytes + smoke 全过。截图：`docs/screenshots/settings-group-edit.png`。
+
 ## 3. 安装与验收步骤
 
 ### 3.1 全新安装

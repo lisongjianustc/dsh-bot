@@ -1,6 +1,6 @@
 {
   "name": "@lisongjianustc/dsh-bot",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "MiniMax-Bot-style always-on agent team for the DeepSeek Harness Web GUI: named Bots backed by real DSH sessions, private and group chats, memory, background jobs, scheduled tasks, and usage.",
   "type": "module",
   "main": "src/index.js",

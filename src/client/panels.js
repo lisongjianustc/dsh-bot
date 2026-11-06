@@ -518,18 +518,6 @@ function BotForm(props) {
     inheritLabel += ' (' + String(defaults.provider) + '/' + String(defaults.model) + ')'
   }
 
-  var identity = { name: name.trim(), role: role.trim(), instructions: instructions, isMain: isNew ? false : bot.isMain === true }
-  var previewAvatar = avatarId === null ? avatarLib.matchAvatar(identity) : avatarLib.avatarById(avatarId)
-
-  function cycleAvatar() {
-    var current = -1
-    for (var i = 0; i < avatarLib.PRESETS.length; i += 1) {
-      if (avatarLib.PRESETS[i].id === avatarId) current = i
-    }
-    var next = (current + 1) % avatarLib.PRESETS.length
-    setAvatarId(avatarLib.PRESETS[next].id)
-  }
-
   function submit() {
     if (name.trim() === '') {
       setError(t('bots.form.nameRequired'))
@@ -1000,18 +988,6 @@ function GroupForm(props) {
         }),
       )
     }
-  }
-
-  var identity = { name: name.trim(), role: role.trim(), instructions: instructions, isMain: isNew ? false : bot.isMain === true }
-  var previewAvatar = avatarId === null ? avatarLib.matchAvatar(identity) : avatarLib.avatarById(avatarId)
-
-  function cycleAvatar() {
-    var current = -1
-    for (var i = 0; i < avatarLib.PRESETS.length; i += 1) {
-      if (avatarLib.PRESETS[i].id === avatarId) current = i
-    }
-    var next = (current + 1) % avatarLib.PRESETS.length
-    setAvatarId(avatarLib.PRESETS[next].id)
   }
 
   function submit() {

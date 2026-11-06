@@ -321,9 +321,11 @@ const zh = {
   'action.create': '创建',
   'action.back': '返回',
   'action.dismiss': '知道了',
+  'action.retry': '重试',
 
   // Errors (stable classes from transport)
   'error.timeout': 'Host {seconds} 秒内没有响应，请稍后重试。',
+  'error.panelCrashed': '这个面板出错了，其他页面不受影响；可以重试或关闭后重新打开。',
   'error.unreachable': '连接不上本机 Host，请确认 DSH 仍在运行。',
   'error.unauthorized': '登录状态已失效，请刷新页面后重试。',
   'error.forbidden': '同源校验未通过：桌面外壳或反向代理可能没有传递浏览器标记。',
@@ -715,8 +717,10 @@ const en = {
   'action.create': 'Create',
   'action.back': 'Back',
   'action.dismiss': 'Got it',
+  'action.retry': 'Retry',
 
   'error.timeout': 'The Host did not answer within {seconds}s. Try again shortly.',
+  'error.panelCrashed': 'This panel hit an error. The rest of the page is unaffected; retry or close and reopen it.',
   'error.unreachable': 'Cannot reach the local Host. Make sure DSH is still running.',
   'error.unauthorized': 'Your session expired. Reload the page and try again.',
   'error.forbidden': 'Same-origin check failed: the desktop shell or a reverse proxy may have dropped the browser marker.',

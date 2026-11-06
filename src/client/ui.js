@@ -486,6 +486,48 @@ function previewOf(message) {
   return text.length > 60 ? text.slice(0, 60) + '…' : text
 }
 
+/**
+ * Error boundary for one panel subtree.
+ *
+ * A single form crash must never blank the whole workbench: the boundary keeps
+ * the surrounding page alive and offers a retry that remounts the children.
+ */
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props)
+    this.state = { error: null }
+    this.reset = this.reset.bind(this)
+  }
+
+  static getDerivedStateFromError(error) {
+    return { error: error }
+  }
+
+  componentDidCatch(error) {
+    try {
+      console.error('dsh-bot panel crashed:', error)
+    } catch (ignored) {
+      /* a logging failure must not escape the boundary */
+    }
+  }
+
+  reset() {
+    this.setState({ error: null })
+  }
+
+  render() {
+    if (this.state.error !== null) {
+      return h(
+        'div',
+        { className: 'db-error-block', role: 'alert' },
+        h('p', { className: 'db-error' }, this.props.message || 'This panel hit an error.'),
+        h(Button, { variant: 'ghost', onClick: this.reset }, this.props.retry || 'Retry'),
+      )
+    }
+    return this.props.children
+  }
+}
+
 module.exports = {
   React: React,
   h: h,
@@ -511,4 +553,5 @@ module.exports = {
   dayLabel: dayLabel,
   formatNumber: formatNumber,
   previewOf: previewOf,
+  ErrorBoundary: ErrorBoundary,
 }

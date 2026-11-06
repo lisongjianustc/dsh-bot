@@ -522,7 +522,7 @@ function BotWorkspacePage(props) {
       center,
       h(RightRail, { t: t, store: store }),
     ),
-    h(panels.SettingsDrawer, { t: t, store: store }),
+    h(ui.ErrorBoundary, { message: t('error.panelCrashed'), retry: t('action.retry') }, h(panels.SettingsDrawer, { t: t, store: store })),
     h(Toasts, { store: store }),
   )
 }
