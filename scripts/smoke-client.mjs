@@ -292,6 +292,7 @@ const existingForm = renderToStaticMarkup(
       notice: '',
       replyMode: 'all',
       maxHops: 3,
+      maxSpeakers: 7,
       handover: true,
       useNote: true,
       noteEntries: [],
@@ -341,6 +342,8 @@ const freshForm = renderToStaticMarkup(
   }),
 )
 check(freshForm.includes('尚未选择目录') && freshForm.includes('添加工作区'), 'a new group starts with an empty directory list and the workspace picker')
+check(existingForm.includes('每轮最多发言人数') && existingForm.includes('value="7"'), 'the group form edits maxSpeakers with the saved value')
+check(freshForm.includes('每轮最多发言人数') && freshForm.includes('value="3"'), 'a new group defaults maxSpeakers to 3')
 
 /* -------------------------------------------------------------- markdown */
 
@@ -396,13 +399,15 @@ const filePanelHtml = renderToStaticMarkup(
   React.createElement(filesModule.FilePanel, { t: tFromBundle, store: Object.assign({}, fakeStore, { fileOpen: true, selectedChatId: 'chat_smoke' }), initial: fileBase }),
 )
 check(filePanelHtml.includes('文件') && filePanelHtml.includes('game'), 'the file panel renders its title, root and breadcrumbs')
+check(filePanelHtml.includes('浏览') && filePanelHtml.includes('预览'), 'the file panel offers browse and preview tabs')
+check(filePanelHtml.includes('aria-selected="true"'), 'the active file tab is marked for assistive tech')
 check(filePanelHtml.includes('sub') && filePanelHtml.includes('a.md') && filePanelHtml.includes('is-dir'), 'the file panel lists directories before files')
 check(filePanelHtml.includes('db-file-crumb'), 'the panel shows a clickable breadcrumb trail')
 const textPreview = renderToStaticMarkup(
   React.createElement(filesModule.FilePanel, {
     t: tFromBundle,
     store: Object.assign({}, fakeStore, { fileOpen: true, selectedChatId: 'chat_smoke' }),
-    initial: Object.assign({}, fileBase, { preview: { kind: 'text', path: '/root/game/docs/a.gd', text: 'line one\nline two', size: 14 } }),
+    initial: Object.assign({}, fileBase, { tab: 'preview', preview: { kind: 'text', path: '/root/game/docs/a.gd', text: 'line one\nline two', size: 14 } }),
   }),
 )
 check(textPreview.includes('line one') && textPreview.includes('db-file-line-no') && textPreview.includes('2'), 'a text preview shows numbered lines')
@@ -410,7 +415,7 @@ const imagePreview = renderToStaticMarkup(
   React.createElement(filesModule.FilePanel, {
     t: tFromBundle,
     store: Object.assign({}, fakeStore, { fileOpen: true, selectedChatId: 'chat_smoke' }),
-    initial: Object.assign({}, fileBase, { preview: { kind: 'image', path: '/root/game/p.png', name: 'p.png', url: 'dsh-bot/api/fs/raw?chatId=c&path=%2Froot%2Fgame%2Fp.png' } }),
+    initial: Object.assign({}, fileBase, { tab: 'preview', preview: { kind: 'image', path: '/root/game/p.png', name: 'p.png', url: 'dsh-bot/api/fs/raw?chatId=c&path=%2Froot%2Fgame%2Fp.png' } }),
   }),
 )
 check(imagePreview.includes('<img') && imagePreview.includes('dsh-bot/api/fs/raw'), 'an image preview uses the raw file route')
@@ -418,7 +423,7 @@ const markdownPreview = renderToStaticMarkup(
   React.createElement(filesModule.FilePanel, {
     t: tFromBundle,
     store: Object.assign({}, fakeStore, { fileOpen: true, selectedChatId: 'chat_smoke' }),
-    initial: Object.assign({}, fileBase, { preview: { kind: 'markdown', path: '/root/game/docs/a.md', text: '# 标题\n\n**粗体**' } }),
+    initial: Object.assign({}, fileBase, { tab: 'preview', preview: { kind: 'markdown', path: '/root/game/docs/a.md', text: '# 标题\n\n**粗体**' } }),
   }),
 )
 check(markdownPreview.includes('db-md-h1') && markdownPreview.includes('<strong>粗体</strong>'), 'Markdown files preview through the shared renderer')
@@ -426,7 +431,7 @@ const binaryPreview = renderToStaticMarkup(
   React.createElement(filesModule.FilePanel, {
     t: tFromBundle,
     store: Object.assign({}, fakeStore, { fileOpen: true, selectedChatId: 'chat_smoke' }),
-    initial: Object.assign({}, fileBase, { preview: { kind: 'binary', path: '/root/game/a.bin', url: 'dsh-bot/api/fs/raw?chatId=c&path=%2Froot%2Fgame%2Fa.bin' } }),
+    initial: Object.assign({}, fileBase, { tab: 'preview', preview: { kind: 'binary', path: '/root/game/a.bin', url: 'dsh-bot/api/fs/raw?chatId=c&path=%2Froot%2Fgame%2Fa.bin' } }),
   }),
 )
 check(binaryPreview.includes('不支持预览') && binaryPreview.includes('打开 / 下载'), 'a binary file offers its raw download instead of a broken preview')
@@ -454,6 +459,7 @@ check(filesModule.fileKind('a.md', 'file') === 'markdown' && filesModule.fileKin
 const fakeRowStore = {
   data: { settings: { userName: '我' } },
   botById: () => undefined,
+  groupById: () => undefined,
   flash() {},
   openFile() {},
   toolExpanded: Object.create(null),
@@ -483,6 +489,35 @@ check(failedRow.includes('read_workspace') === false && failedRow.includes('exit
 const bareRow = toolRowHtml([{ type: 'tool', name: 'read_workspace', status: 'ok' }], fakeRowStore)
 check(bareRow.includes('read_workspace') && !bareRow.includes('db-tool-detail'), 'a legacy tool part without args/result still renders')
 const linkedRow = toolRowHtml([{ type: 'text', text: '看 `game/balance.gd` 与 [配置](docs/a.md)' }], fakeRowStore)
+check(linkedRow.includes('db-md-file') && linkedRow.includes('title="game/balance.gd"'), 'file references in chat text render as file links')
+
+// v0.6: mention helpers, mention chips and relay rows.
+check(chatModule.mentionTokenAt('hello @Ch', 9) !== null && chatModule.mentionTokenAt('hello @Ch', 9).query === 'Ch', 'typing @ opens a mention query')
+check(chatModule.mentionTokenAt('mail a@b', 9) === null, 'an @ inside a word is not a mention trigger')
+const mentionRows = chatModule.mentionCandidates([{ id: 'bot_a', name: 'Chief', role: '总管' }, { id: 'bot_b', name: 'Alice', role: '研究员' }], '全部成员', '')
+check(mentionRows.length === 3 && mentionRows[2].kind === 'all', 'the mention picker lists members plus @all')
+check(chatModule.mentionCandidates([{ id: 'bot_a', name: 'Chief', role: '总管' }, { id: 'bot_b', name: 'Alice', role: '研究员' }], '全部成员', 'ali').length === 1, 'the mention picker filters by name or role')
+const previewAll = chatModule.speakerPreview({ replyMode: 'all', maxSpeakers: 3 }, [{ id: 'bot_a', name: 'Chief' }, { id: 'bot_b', name: 'Alice' }], '')
+check(previewAll.kind === 'all' && previewAll.cap === 2, 'an unmentioned all-mode draft previews the capped roster')
+const previewMention = chatModule.speakerPreview({ replyMode: 'all', maxSpeakers: 3, adminId: 'bot_a' }, [{ id: 'bot_a', name: 'Chief' }, { id: 'bot_b', name: 'Alice' }], '@Alice 看下')
+check(previewMention.kind === 'mentions' && previewMention.names.join(',') === 'Alice', 'explicit mentions drive the speaker preview')
+const previewAdmin = chatModule.speakerPreview({ replyMode: 'admin', adminId: 'bot_a', maxSpeakers: 3 }, [{ id: 'bot_a', name: 'Chief' }, { id: 'bot_b', name: 'Alice' }], '')
+check(previewAdmin.kind === 'admin' && previewAdmin.names[0] === 'Chief', 'admin mode previews the admin alone')
+const mentionHtml = mdBlockHtml('请 @Chief 和 @all 看一下')
+const mentionMarkdown = renderToStaticMarkup(React.createElement('div', null, markdown.render('请 @Chief 和 @all 看一下', undefined, { mentionNames: ['Chief', 'Alice', 'all'] })))
+check(mentionMarkdown.includes('db-mention') && mentionMarkdown.includes('@Chief'), 'message text highlights @mentions as chips')
+const relayHtml = toolRowHtml([{ type: 'text', text: '任务完成：总结 DSH' }], Object.assign({}, fakeRowStore, {}))
+const relayRowHtml = renderToStaticMarkup(
+  React.createElement(chatModule.MessageRow, {
+    t: tFromBundle,
+    store: fakeRowStore,
+    chat: { id: 'chat_group', kind: 'group', groupId: 'grp_x' },
+    message: { id: 'msg_relay', chatId: 'chat_group', seq: 1, ts: 1, role: 'relay', text: '任务完成', status: 'done', parts: [{ type: 'text', text: '任务完成' }] },
+    onQuote() {},
+  }),
+)
+check(relayRowHtml.includes('is-relay') && relayRowHtml.includes('转述'), 'relay results keep their distinct style')
+
 check(linkedRow.includes('db-md-file') && linkedRow.includes('title="game/balance.gd"'), 'file references in chat text render as file links')
 
 /* ------------------------------------------------------------- stub cordis */
@@ -565,6 +600,7 @@ check(store.selectedChatId === 'chat_b7a1c9d3e5f2', 'pinned Chief chat is select
 check(store.workspaces().length === 2, 'demo snapshot offers workspaces for the Bot form')
 check(store.tasks().length === 4 && store.helpers().length === 1, 'demo snapshot offers tasks and helpers')
 check(store.mode === 'mock' && document.head.children.length === 1, 'stylesheet is installed once through ctx.effect')
+check(String(document.head.children[0].textContent).includes('520px'), 'the file panel is 520px wide')
 check(document.head.children[0].attributes['data-dsh-bot'] === '', 'stylesheet carries data-dsh-bot')
 
 const t = ctx.locale.bind('dsh-bot')
@@ -702,6 +738,36 @@ check(html.includes('db-chat-head'), 'group chat renders its header')
 check(html.includes('架构师'), 'group timeline shows the speaking bot name')
 check(html.includes('db-activity'), 'running background helpers show a bar above the group timeline')
 check(!html.includes('[PASS]'), 'group timeline hides the [PASS] turn')
+check(html.includes('本轮将发言：') && html.includes('全部成员（最多 3 人）'), 'the group composer previews the speakers')
+check(html.includes('群决策'), 'the group header offers the decisions entry')
+store.setDraft(groupChat.id, '@Chief 看下')
+store.selectChat(attachmentChat.id)
+store.selectChat(groupChat.id)
+html = render(mainReg.component, face)
+check(html.includes('本轮将发言：') && html.includes('<strong>Chief</strong>'), 'mentioning a member updates the speaker preview')
+store.setDraft(groupChat.id, '')
+const emptyGroupBefore = store.groups().length
+await store.createGroup({
+  name: '空群冒烟',
+  adminId: store.bots()[0].id,
+  memberIds: [store.bots()[0].id, store.bots()[1].id],
+  replyMode: 'all',
+  maxHops: 3,
+  maxSpeakers: 3,
+  handover: true,
+  useNote: true,
+})
+const emptyGroup = store.groups().find((group) => group.name === '空群冒烟')
+const emptyGroupChat = store.chats().find((conversation) => conversation.kind === 'group' && conversation.groupId === emptyGroup.id)
+store.selectChat(emptyGroupChat.id)
+await sleep(120)
+html = render(mainReg.component, face)
+check(html.includes('这是项目群'), 'an empty group shows the kickoff guidance')
+check(html.includes('db-group-empty'), 'the empty group guidance has its own style')
+await store.deleteGroup(emptyGroup.id)
+check(store.groups().length === emptyGroupBefore, 'the temporary group is cleaned up')
+store.selectChat(groupChat.id)
+
 
 /* ------------------------------------------------------- demo actions */
 
@@ -1307,11 +1373,13 @@ await store.updateGroup('grp_live', {
   handover: true,
   useNote: true,
   workspaces: ['ws_game', '/Users/me/custom'],
+  maxSpeakers: 5,
 }, { resetSessions: true })
 const groupUpdateCall = fetchCalls.filter((call) => call.path.includes('/group') && call.body !== undefined && call.body.action === 'update').pop()
 check(groupUpdateCall !== undefined && Array.isArray(groupUpdateCall.body.group.workspaces) && groupUpdateCall.body.group.workspaces.length === 2, 'a group update sends the workspaces array')
 check(groupUpdateCall !== undefined && groupUpdateCall.body.resetSessions === true, 'resetSessions travels beside the group draft')
 check(groupUpdateCall !== undefined && groupUpdateCall.body.group.resetSessions === true, 'the group draft carries resetSessions too for hosts that read it there')
+check(groupUpdateCall !== undefined && groupUpdateCall.body.group.maxSpeakers === 5, 'a group update sends maxSpeakers')
 
 check(typeof store.openFile === 'function' && typeof store.fsRoots === 'function', 'the store exposes the file panel controls')
 store.openFile('/root/game/docs/a.md')
@@ -1337,6 +1405,14 @@ try {
   fsForbidden = error
 }
 check(fsForbidden !== undefined && fsForbidden.status === 403, 'an out-of-root path surfaces the Host 403')
+store.openFile('/root/game/docs/a.md')
+check(store.fileOpen === true && store.fileTab === 'preview', 'opening a file reference lands on the preview tab')
+store.setFileTab('browse')
+check(store.fileTab === 'browse', 'the file panel can switch back to browse')
+store.rememberFileView('chat_111111111111', { browsePath: '/root/game/docs', browseScroll: 42 })
+const rememberedView = store.fileViewOf('chat_111111111111')
+check(rememberedView.browsePath === '/root/game/docs' && rememberedView.browseScroll === 42, 'each chat remembers its browse state')
+store.closeFile()
 
 await store.loadMemory('team', null, true)
 check(store.memory.candidates.length === 1 && store.memory.candidates[0].text === '线上候选记忆', 'loadMemory keeps the pending candidates')

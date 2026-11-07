@@ -55,7 +55,9 @@ function makeHarness({ subagents = true, providers = ['spawn'], language = 'zh' 
     },
     chats: {
       get(id) {
-        return id === 'chat_a' ? { id: 'chat_a', kind: 'dm', title: 'Alice' } : undefined
+        if (id === 'chat_a') return { id: 'chat_a', kind: 'dm', title: 'Alice' }
+        if (id === 'chat_g') return { id: 'chat_g', kind: 'group', title: 'Group' }
+        return undefined
       },
       view(chat) {
         return { ...chat }
@@ -204,6 +206,19 @@ test('helpers: stopping a running helper suppresses its late report', async () =
   await new Promise(resolve => setTimeout(resolve, 20))
   assert.equal(harness.helpers.get('helper_1').status, 'stopped')
   assert.equal(harness.appended.length, 0)
+  assert.equal(harness.sent.length, 0)
+})
+
+test('helpers: a group-origin helper relays its report into the group, without a verification turn', async () => {
+  const harness = makeHarness()
+  const groupChat = { id: 'chat_g', kind: 'group', title: 'Group' }
+  await harness.helpers.start({ parentAgent, chat: groupChat, bot, task: 'group work', title: 'group task' })
+  harness.lastActivation.resolve({ output: [{ type: 'text', text: 'group report' }], stopReason: { kind: 'completed' } })
+  assert.ok(await waitFor(() => harness.helpers.get('helper_1').status === 'done'))
+  assert.equal(harness.appended.length, 1)
+  assert.equal(harness.appended[0].chatId, 'chat_g')
+  assert.match(harness.appended[0].text, /group report/)
+  // A group already reads the relay as its next snapshot, so no extra turn runs.
   assert.equal(harness.sent.length, 0)
 })
 

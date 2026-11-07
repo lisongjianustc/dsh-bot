@@ -2,7 +2,9 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   appendNote,
+  decisionSentences,
   groupQueue,
+  groupSpeakers,
   groupMemoryQuery,
   handoverSummary,
   hopLimit,
@@ -79,6 +81,51 @@ test('group queue: mentions first, else reply mode', () => {
   assert.deepEqual(groupQueue(group, members, 'hello'), ['bot_alice'])
   assert.deepEqual(groupQueue(group, members, '@Bob 来看'), ['bot_bob'])
   assert.deepEqual(groupQueue({ ...group, replyMode: 'all' }, members, 'hello'), ['bot_alice', 'bot_bob'])
+})
+
+test('group speakers: default 3, 0 means unlimited, capped at 20', () => {
+  assert.equal(groupSpeakers({}), 3)
+  assert.equal(groupSpeakers({ maxSpeakers: 5 }), 5)
+  assert.equal(groupSpeakers({ maxSpeakers: 0 }), 0)
+  assert.equal(groupSpeakers({ maxSpeakers: 99 }), 20)
+  assert.equal(groupSpeakers({ maxSpeakers: '4' }), 4)
+  assert.equal(groupSpeakers({ maxSpeakers: 'junk' }), 3)
+})
+
+test('group queue: a mention is the only speaker list, in mention order', () => {
+  const group = { adminId: 'bot_alice', memberIds: ['bot_alice', 'bot_bob', 'bot_carol'], replyMode: 'all', maxSpeakers: 1 }
+  const members = [
+    { id: 'bot_alice', name: 'Alice' },
+    { id: 'bot_bob', name: 'Bob' },
+    { id: 'bot_carol', name: 'Carol' },
+  ]
+  assert.deepEqual(groupQueue(group, members, '@Carol @Bob 上'), ['bot_carol', 'bot_bob'])
+})
+
+test('group queue: all mode uses the speaker cap, 0 means everyone', () => {
+  const members = Array.from({ length: 5 }, (_, index) => ({ id: `bot_${index}`, name: `B${index}` }))
+  const ids = members.map(member => member.id)
+  const base = { adminId: 'bot_0', memberIds: ids, replyMode: 'all' }
+  assert.deepEqual(groupQueue(base, members, 'hello'), ['bot_0', 'bot_1', 'bot_2'])
+  assert.deepEqual(groupQueue({ ...base, maxSpeakers: 2 }, members, 'hello'), ['bot_0', 'bot_1'])
+  assert.deepEqual(groupQueue({ ...base, maxSpeakers: 0 }, members, 'hello'), ids)
+  // admin mode is always just the admin, whatever the cap says.
+  assert.deepEqual(groupQueue({ ...base, replyMode: 'admin', maxSpeakers: 0 }, members, 'hello'), ['bot_0'])
+})
+
+test('group decision log: only explicit conclusion sentences are extracted', () => {
+  assert.deepEqual(decisionSentences('先聊两句。结论：用方案 B。决定：周五发版。'), ['结论：用方案 B。', '决定：周五发版。'])
+  assert.deepEqual(decisionSentences('约定: 每周一同步'), ['约定: 每周一同步'])
+  assert.deepEqual(decisionSentences('这只是普通聊天，没有结论。'), [])
+})
+
+test('group note: the same decision is never appended twice', () => {
+  const group = { useNote: true, noteEntries: [{ speaker: 'Alice', text: '结论：用方案 B。' }] }
+  const once = appendNote(group, [{ speaker: 'Alice', text: '结论：用方案 B。' }])
+  assert.equal(once.length, 1)
+  // A longer entry that already contains the decision also absorbs it.
+  const longer = appendNote({ useNote: true, noteEntries: [{ speaker: 'Alice', text: '长篇回复……结论：用方案 B。' }] }, [{ speaker: 'Alice', text: '结论：用方案 B。' }])
+  assert.equal(longer.length, 1)
 })
 
 test('group queue: an admin who left the member list falls back to a member', () => {
@@ -166,7 +213,7 @@ test('hand-over summary prefers the note and clips the reply tail', () => {
 })
 
 test('group note: newest entries win under the entry, count and char budgets', () => {
-  const round = Array.from({ length: 10 }, (_, index) => ({ speaker: `Bot${index}`, text: `x`.repeat(300) }))
+  const round = Array.from({ length: 10 }, (_, index) => ({ speaker: `Bot${index}`, text: `${'x'.repeat(290)} ${index}` }))
   const group = { useNote: true, noteEntries: [] }
   const kept = appendNote(group, round)
   assert.ok(kept.length <= 6)

@@ -26,7 +26,15 @@ import {
   storageBudget,
   validateMemoryWrite,
 } from './memory.js'
-import { GROUP_NOTE_MARK, HOP_LIMIT_MAX, NOTE_MAX_CHARS, appendNote, noteEntries } from './mention.js'
+import {
+  GROUP_NOTE_MARK,
+  GROUP_SPEAKERS_DEFAULT,
+  GROUP_SPEAKERS_MAX,
+  HOP_LIMIT_MAX,
+  NOTE_MAX_CHARS,
+  appendNote,
+  noteEntries,
+} from './mention.js'
 import { clean, clip, dayStamp, newId, sha1 } from './util.js'
 
 /** Longest Bot or group name. */
@@ -50,6 +58,7 @@ export const REPLY_MODES = ['admin', 'all']
 /** The limits the client shows in its forms. */
 export const LIMITS = {
   maxHops: HOP_LIMIT_MAX,
+  maxSpeakers: GROUP_SPEAKERS_MAX,
   memoryEntryMax: ENTRY_MAX,
   memoryStorageMax: STORAGE_MAX,
   memoryContextMax: MEMORY_CONTEXT_MAX,
@@ -172,6 +181,10 @@ function groupDraft(input, bots, resolveWorkspace) {
   const replyMode = input.replyMode === undefined ? 'admin' : String(input.replyMode)
   if (!REPLY_MODES.includes(replyMode)) throw new BotError('invalid-request', 'a group reply mode is admin or all')
   const maxHops = Math.max(0, Math.min(HOP_LIMIT_MAX, Math.floor(Number(input.maxHops) || 0)))
+  // 0 is "no limit"; an absent value uses the group default (3 speakers).
+  const maxSpeakers = input.maxSpeakers === undefined
+    ? GROUP_SPEAKERS_DEFAULT
+    : Math.max(0, Math.min(GROUP_SPEAKERS_MAX, Math.floor(Number(input.maxSpeakers) || 0)))
   let workspaces
   if (input.workspaces !== undefined) {
     const refs = Array.isArray(input.workspaces) ? input.workspaces : null
@@ -197,6 +210,7 @@ function groupDraft(input, bots, resolveWorkspace) {
     notice: clip(String(input.notice ?? '').trim(), NOTICE_MAX),
     replyMode,
     maxHops,
+    maxSpeakers,
     handover: input.handover === true,
     useNote: input.useNote === true,
     ...(workspaces === undefined ? {} : { workspaces }),
@@ -581,6 +595,7 @@ export function createServices({ ctx, config = {}, store }) {
         notice: source.notice ?? group.notice,
         replyMode: source.replyMode ?? group.replyMode,
         maxHops: source.maxHops ?? group.maxHops,
+        maxSpeakers: source.maxSpeakers ?? group.maxSpeakers,
         handover: source.handover ?? group.handover,
         useNote: source.useNote ?? group.useNote,
         workspaces: source.workspaces === undefined ? group.workspaces : source.workspaces,
@@ -1426,6 +1441,7 @@ export function createServices({ ctx, config = {}, store }) {
       notice: group.notice ?? '',
       replyMode: group.replyMode ?? 'admin',
       maxHops: group.maxHops ?? 0,
+      maxSpeakers: group.maxSpeakers ?? GROUP_SPEAKERS_DEFAULT,
       handover: group.handover === true,
       useNote: group.useNote === true,
       workspaces: (group.workspaces ?? []).map(workspace => ({ ...workspace })),

@@ -885,6 +885,10 @@ function GroupsTab(props) {
                   t('groups.memberCount', { count: String(members.length) }),
                   ' · ',
                   group.replyMode === 'admin' ? t('groups.form.replyMode.admin') : t('groups.form.replyMode.all'),
+                  ' · ',
+                  Number(group.maxSpeakers === undefined ? 3 : group.maxSpeakers) > 0
+                    ? t('groups.cardSpeakers', { n: String(Number(group.maxSpeakers === undefined ? 3 : group.maxSpeakers)) })
+                    : t('groups.speakersUnlimited'),
                 ),
                 directories.summaryText(directories.normalize(group.workspaces), t) === ''
                   ? null
@@ -991,6 +995,11 @@ function GroupForm(props) {
   var pairHops = React.useState(isNew ? String(store.data === null ? 3 : store.data.limits.maxHops) : String(group.maxHops))
   var maxHops = pairHops[0]
   var setMaxHops = pairHops[1]
+  var pairSpeakers = React.useState(
+    isNew ? '3' : String(group.maxSpeakers === undefined || group.maxSpeakers === null ? 3 : group.maxSpeakers),
+  )
+  var maxSpeakers = pairSpeakers[0]
+  var setMaxSpeakers = pairSpeakers[1]
   var pairHandover = React.useState(isNew ? true : group.handover === true)
   var handover = pairHandover[0]
   var setHandover = pairHandover[1]
@@ -1061,6 +1070,8 @@ function GroupForm(props) {
     if (members.indexOf(adminId) < 0) members.push(adminId)
     var hops = parseInt(maxHops, 10)
     if (!isFinite(hops)) hops = 0
+    var speakers = parseInt(maxSpeakers, 10)
+    if (!isFinite(speakers)) speakers = 3
     var payload = directories.applyToPayload(
       {
         name: name.trim(),
@@ -1069,6 +1080,7 @@ function GroupForm(props) {
         notice: notice,
         replyMode: replyMode,
         maxHops: Math.max(0, Math.min(20, hops)),
+        maxSpeakers: Math.max(0, Math.min(20, speakers)),
         handover: handover,
         useNote: useNote,
       },
@@ -1089,7 +1101,10 @@ function GroupForm(props) {
         var savedDirs = saved === undefined ? [] : directories.normalize(saved.workspaces)
         var unsupported = directoryList.length > 0 && savedDirs.length !== directoryList.length
         var sessionsReset = result !== null && typeof result === 'object' && result.sessionsReset === true
+        var savedSpeakers = saved === undefined ? undefined : saved.maxSpeakers
+        var speakersUnsupported = saved !== undefined && savedSpeakers !== undefined && savedSpeakers !== payload.maxSpeakers
         if (unsupported) store.flash(t('groups.dirsUnsupported'), 'error')
+        else if (speakersUnsupported) store.flash(t('groups.speakersUnsupported'), 'error')
         else store.flash(sessionsReset ? t('groups.sessionsReset') : t('general.saved'), 'success')
         props.onClose()
       },
@@ -1192,6 +1207,11 @@ function GroupForm(props) {
       label: t('groups.form.maxHops'),
       hint: t('groups.form.maxHopsHint2'),
       children: h(ui.TextInput, { type: 'number', value: maxHops, onChange: setMaxHops }),
+    }),
+    h(ui.Field, {
+      label: t('groups.form.maxSpeakers'),
+      hint: t('groups.form.maxSpeakersHint'),
+      children: h(ui.TextInput, { type: 'number', min: '0', max: '20', value: maxSpeakers, onChange: setMaxSpeakers }),
     }),
     h(
       'div',

@@ -30,7 +30,7 @@ In DSH a Session *is* an Agent. dsh-bot does not invent a second execution layer
 | **Bot team** | Named Bots with role, instructions, avatar, model, reasoning effort, permission preset and pinned workspace. Chief Bot is created first and is the only one that may edit the roster and groups. |
 | **Pinned chats** | Pin any conversation; Chief's private chat is pinned on first launch. |
 | **Private chats** | Every message is one real Agent turn. Streaming text, tool rows, retry, cancel, quote, copy, markdown rendering. |
-| **Group chats** | `@Name` mentions, admin/all reply modes, `[PASS]` skipping, hop limit with a wrap-up turn, handover of the previous conclusion, and a group note that survives clearing the chat. The main Bot can create/update/delete groups and post into any group. |
+| **Group chats** | `@Name` mentions with a member picker and `@all`, speaker routing with a per-round cap (`maxSpeakers`, default 3), group-first collaboration (work goes to the group, private chat stays one-to-one), auto-captured decisions in the group note, admin/all reply modes, `[PASS]` skipping, hop limit with a wrap-up turn, handover of the previous conclusion, and a group note that survives clearing the chat. The main Bot can create/update/delete groups and post into any group. |
 | **Task dispatch** | `bot_dispatch_tasks` / `bot_get_tasks` / `bot_cancel_tasks`: batched background delegation with request-id idempotency, receipts, result relay and cancel cascade. |
 | **Background helpers** | Hidden child sessions for work that should not block the chat; the report comes back and the Bot verifies it in its own words. |
 | **Memory** | Team and per-Bot stores, selected into the next turn under a 6,000-character budget with revision guards and a journal — with **automatic capture** and a review queue (see below). |
@@ -110,7 +110,7 @@ Browser (client half)                      Host process (host half)
 ## Roadmap
 
 - [x] Real-session Bots, private/group chats, memory, schedules, helpers, usage
-- [x] Group management tools + task dispatch (21/21 tool parity)
+- [x] Group management tools + task dispatch (21/21 tool parity); group @ mention picker, speaker routing and group-first collaboration
 - [x] Rich input (images/files), per-Bot workspace, 40-avatar SVG library, pinned chats
 - [x] Tool call details, right-side file browser/preview, automatic memory with review queue
 - [ ] Multiple conversations per Bot
@@ -121,8 +121,8 @@ Browser (client half)                      Host process (host half)
 
 ```sh
 node scripts/build-client.mjs   # src/client/*.js -> lib/client.js
-node --test test/*.test.js      # 190 host tests
-node scripts/smoke-client.mjs   # 256 client checks
+node --test test/*.test.js      # 210 host tests
+node scripts/smoke-client.mjs   # 290 client checks
 node scripts/verify-live.mjs http://127.0.0.1:<port>   # live Host smoke
 ```
 

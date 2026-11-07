@@ -375,10 +375,22 @@ function MessageRow(props) {
   // A message that already settled must never show a spinning tool row: the
   // Host's result merge can miss a tool/result, and "unconfirmed" is honest.
   var messageDone = message.status !== 'streaming' && message.status !== 'pending'
-  var fileOptions =
+  var renderOptions =
     store !== undefined && store !== null && typeof store.openFile === 'function'
       ? { fileLink: function (path) { store.openFile(path) } }
-      : undefined
+      : {}
+  if (chat !== undefined && chat !== null && chat.kind === 'group' && chat.groupId !== undefined) {
+    var renderGroup = store.groupById(chat.groupId)
+    if (renderGroup !== undefined && renderGroup !== null && Array.isArray(renderGroup.memberIds)) {
+      var mentionNames = []
+      for (var mi = 0; mi < renderGroup.memberIds.length; mi += 1) {
+        var mentionBot = store.botById(renderGroup.memberIds[mi])
+        if (mentionBot !== undefined && mentionBot !== null && typeof mentionBot.name === 'string') mentionNames.push(mentionBot.name)
+      }
+      mentionNames.push('all')
+      renderOptions.mentionNames = mentionNames
+    }
+  }
   var isUser = message.role === 'user'
   var isSystem = message.role === 'system'
   var isRelay = message.role === 'relay'
@@ -440,7 +452,7 @@ function MessageRow(props) {
         h(
           'div',
           { key: 'text-' + k, className: 'db-text' },
-          markdown.render(current.text, streaming && k === lastTextIndex ? 'db-cursor' : undefined, fileOptions),
+          markdown.render(current.text, streaming && k === lastTextIndex ? 'db-cursor' : undefined, renderOptions),
         ),
       )
     }
@@ -456,7 +468,7 @@ function MessageRow(props) {
   }
   if (nodes.length === 0 && text !== '') {
     nodes.push(
-      h('div', { key: 'text-fallback', className: 'db-text' }, markdown.render(text, streaming ? 'db-cursor' : undefined, fileOptions)),
+      h('div', { key: 'text-fallback', className: 'db-text' }, markdown.render(text, streaming ? 'db-cursor' : undefined, renderOptions)),
     )
   }
   if (nodes.length === 0 && streaming) {
@@ -589,6 +601,82 @@ function MessageRow(props) {
   )
 }
 
+/** The `@query` token immediately before the caret, if any. */
+function mentionTokenAt(text, caret) {
+  var source = String(text === undefined || text === null ? '' : text)
+  var at = Number(caret)
+  if (!isFinite(at) || at < 0 || at > source.length) at = source.length
+  var upto = source.slice(0, at)
+  var start = upto.lastIndexOf('@')
+  if (start < 0) return null
+  if (start > 0 && /[A-Za-z0-9_]/.test(upto.charAt(start - 1))) return null
+  var query = upto.slice(start + 1)
+  if (query !== '' && /[\s@]/.test(query)) return null
+  return { start: start, query: query, caret: at }
+}
+
+/** Candidate rows for the mention picker (matching members plus @all). */
+function mentionCandidates(members, allLabel, query) {
+  var rows = []
+  var needle = String(query === undefined || query === null ? '' : query).toLowerCase()
+  var list = Array.isArray(members) ? members : []
+  for (var i = 0; i < list.length; i += 1) {
+    var member = list[i]
+    if (member === null || member === undefined) continue
+    var name = String(member.name === undefined ? '' : member.name)
+    var role = String(member.role === undefined ? '' : member.role)
+    if (needle !== '' && name.toLowerCase().indexOf(needle) < 0 && role.toLowerCase().indexOf(needle) < 0) continue
+    rows.push({ kind: 'member', id: member.id, name: name, role: role, color: member.color, avatar: member.avatar })
+  }
+  var label = String(allLabel === undefined ? 'all' : allLabel)
+  if (needle === '' || label.toLowerCase().indexOf(needle) >= 0 || 'all'.indexOf(needle) >= 0) {
+    rows.push({ kind: 'all', name: 'all', label: label })
+  }
+  return rows
+}
+
+/**
+ * Who is expected to speak on one group draft, mirroring the Host routing:
+ * explicit mentions win (in order), otherwise the reply mode decides and the
+ * per-round cap bounds the `all` queue.
+ */
+function speakerPreview(group, members, text) {
+  var list = Array.isArray(members) ? members.filter(function (member) { return member !== null && member !== undefined }) : []
+  var names = list.map(function (member) { return String(member.name === undefined ? '' : member.name) }).filter(function (name) { return name !== '' })
+  var lower = String(text === undefined || text === null ? '' : text).toLowerCase()
+  var ordered = names.slice().sort(function (a, b) { return b.length - a.length })
+  var found = []
+  var all = false
+  for (var index = lower.indexOf('@'); index >= 0; index = lower.indexOf('@', index + 1)) {
+    if (index > 0 && /[A-Za-z0-9_]/.test(lower.charAt(index - 1))) continue
+    if (lower.slice(index + 1, index + 4) === 'all' && !/[A-Za-z0-9_]/.test(lower.charAt(index + 4))) {
+      all = true
+      continue
+    }
+    var hit = null
+    for (var i = 0; i < ordered.length; i += 1) {
+      var candidate = ordered[i]
+      if (lower.slice(index + 1, index + 1 + candidate.length) !== candidate.toLowerCase()) continue
+      if (lower.charAt(index + 1 + candidate.length) !== '' && /[A-Za-z0-9_]/.test(lower.charAt(index + 1 + candidate.length))) continue
+      hit = candidate
+      break
+    }
+    if (hit !== null && found.indexOf(hit) < 0) found.push(hit)
+    if (hit !== null) index += hit.length
+  }
+  var speakers = group !== null && group !== undefined && group.maxSpeakers !== undefined && group.maxSpeakers !== null ? Number(group.maxSpeakers) : 3
+  if (!isFinite(speakers)) speakers = 3
+  if (found.length > 0) return { kind: 'mentions', names: found, cap: speakers }
+  if (group !== null && group !== undefined && group.replyMode !== 'all') {
+    var admin = null
+    for (var ai = 0; ai < list.length; ai += 1) {
+      if (group.adminId !== undefined && String(list[ai].id) === String(group.adminId)) admin = String(list[ai].name === undefined ? '' : list[ai].name)
+    }
+    return { kind: admin === null ? 'none' : 'admin', names: admin === null ? [] : [admin], cap: speakers }
+  }
+  return { kind: 'all', names: [], cap: speakers > 0 ? Math.min(speakers, names.length) : 0 }
+}
+
 /** Attachment limits shared with the Host contract. */
 var MAX_ATTACHMENTS = 8
 var MAX_UPLOAD_BYTES = 25 * 1024 * 1024
@@ -613,6 +701,20 @@ function Composer(props) {
   var pairDrag = React.useState(false)
   var dragging = pairDrag[0]
   var setDragging = pairDrag[1]
+  var pairMention = React.useState({ open: false, index: 0, start: -1, query: '', caret: 0 })
+  var mention = pairMention[0]
+  var setMention = pairMention[1]
+  var groupChat = chat.kind === 'group' && chat.groupId !== undefined ? store.groupById(chat.groupId) : undefined
+  var groupMembers = []
+  if (groupChat !== undefined && groupChat !== null && Array.isArray(groupChat.memberIds)) {
+    for (var gm = 0; gm < groupChat.memberIds.length; gm += 1) {
+      var memberBot = store.botById(groupChat.memberIds[gm])
+      if (memberBot !== undefined && memberBot !== null) groupMembers.push(memberBot)
+    }
+  }
+  var mentionNames = []
+  for (var mn = 0; mn < groupMembers.length; mn += 1) mentionNames.push(String(groupMembers[mn].name))
+  mentionNames.push('all')
   var areaRef = React.useRef(null)
   var imageInputRef = React.useRef(null)
   var fileInputRef = React.useRef(null)
@@ -784,6 +886,57 @@ function Composer(props) {
     if (input !== null && input !== undefined) input.click()
   }
 
+  function pickerRows() {
+    var rows = mentionCandidates(groupMembers, t('chat.mentionAll'), mention.open ? mention.query : '')
+    for (var i = 0; i < rows.length; i += 1) {
+      if (rows[i].kind === 'all') {
+        rows[i].role = t('chat.mentionAllHint')
+        rows[i].label = t('chat.mentionAll')
+      }
+    }
+    return rows
+  }
+
+  function updateMentionFrom(text, caret) {
+    if (groupChat === undefined || groupChat === null) return
+    var info = mentionTokenAt(text, caret)
+    if (info === null) {
+      if (mention.open) setMention({ open: false, index: 0, start: -1, query: '', caret: caret })
+      return
+    }
+    setMention({ open: true, index: 0, start: info.start, query: info.query, caret: caret })
+  }
+
+  function chooseMention(row) {
+    if (row === undefined || row === null) return
+    var token = row.kind === 'all' ? '@all ' : '@' + row.name + ' '
+    var end = mention.start + 1 + String(mention.query).length
+    var next = value.slice(0, mention.start) + token + value.slice(end)
+    setValue(next)
+    store.setDraft(chat.id, next)
+    setMention({ open: false, index: 0, start: -1, query: '', caret: 0 })
+    var area = areaRef.current
+    if (area !== null && area !== undefined) {
+      area.focus()
+      var caret = mention.start + token.length
+      try {
+        area.setSelectionRange(caret, caret)
+      } catch (error) {
+        /* selection unsupported */
+      }
+    }
+    resize()
+  }
+
+  /** Who the Host is likely to let speak on this text (mirrors its routing). */
+  function speakersText() {
+    if (groupChat === undefined || groupChat === null) return ''
+    var preview = speakerPreview(groupChat, groupMembers, value)
+    if (preview.kind === 'mentions') return preview.names.join(', ')
+    if (preview.kind === 'admin' || preview.kind === 'none') return preview.names.length > 0 ? preview.names[0] : ''
+    return preview.cap > 0 ? t('chat.speakersAllCap', { n: String(preview.cap) }) : t('chat.speakersAll')
+  }
+
   function submit() {
     if (!canSend) return
     var text = value.trim()
@@ -817,6 +970,52 @@ function Composer(props) {
   function onKeyDown(event) {
     var native = event.nativeEvent === undefined ? event : event.nativeEvent
     if (native !== undefined && native.isComposing === true) return
+    if (mention.open) {
+      var rows = pickerRows()
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault()
+        if (rows.length === 0) return
+        var nextIndex = event.key === 'ArrowDown' ? (mention.index + 1) % rows.length : (mention.index - 1 + rows.length) % rows.length
+        setMention({ open: true, index: nextIndex, start: mention.start, query: mention.query, caret: mention.caret })
+        return
+      }
+      if (event.key === 'Enter' || event.key === 'Tab') {
+        event.preventDefault()
+        if (rows.length > 0) chooseMention(rows[Math.max(0, Math.min(rows.length - 1, mention.index))])
+        return
+      }
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        setMention({ open: false, index: 0, start: -1, query: '', caret: 0 })
+        return
+      }
+    }
+    if (event.key === 'Backspace' && groupChat !== undefined && groupChat !== null) {
+      var area = areaRef.current
+      if (area !== null && area !== undefined && area.selectionStart === area.selectionEnd && area.selectionStart > 0) {
+        var caret = area.selectionStart
+        var before = value.slice(0, caret)
+        var tokens = mentionNames.slice().sort(function (a, b) { return b.length - a.length })
+        for (var ti = 0; ti < tokens.length; ti += 1) {
+          var token = '@' + (tokens[ti] === 'all' ? 'all' : tokens[ti])
+          var tokenWithSpace = token + ' '
+          if (before.slice(-tokenWithSpace.length) === tokenWithSpace || before.slice(-token.length) === token) {
+            event.preventDefault()
+            var removal = before.slice(-tokenWithSpace.length) === tokenWithSpace ? tokenWithSpace : token
+            var nextValue = value.slice(0, caret - removal.length) + value.slice(caret)
+            setValue(nextValue)
+            store.setDraft(chat.id, nextValue)
+            setMention({ open: false, index: 0, start: -1, query: '', caret: 0 })
+            try {
+              area.setSelectionRange(caret - removal.length, caret - removal.length)
+            } catch (error) {
+              /* selection unsupported */
+            }
+            return
+          }
+        }
+      }
+    }
     if (event.key === 'Enter' && event.shiftKey !== true) {
       event.preventDefault()
       submit()
@@ -936,6 +1135,41 @@ function Composer(props) {
               ),
             )
           : null,
+        mention.open
+          ? h(
+              'div',
+              { className: 'db-mention-pop', role: 'listbox', 'aria-label': t('chat.mentionPick') },
+              pickerRows().length === 0
+                ? h('div', { className: 'db-mention-empty' }, t('chat.mentionEmpty'))
+                : pickerRows().map(function (row, index) {
+                    return h(
+                      'button',
+                      {
+                        key: row.kind === 'all' ? 'all' : String(row.id),
+                        type: 'button',
+                        role: 'option',
+                        'aria-selected': index === mention.index,
+                        className: 'db-mention-row' + (index === mention.index ? ' is-active' : '') + (row.kind === 'all' ? ' is-all' : ''),
+                        onMouseDown: function (event) {
+                          event.preventDefault()
+                        },
+                        onClick: function () {
+                          chooseMention(row)
+                        },
+                      },
+                      row.kind === 'all'
+                        ? h('span', { className: 'db-mention-row-icon' }, h(Icon, { name: 'users', size: 13 }))
+                        : h(ui.Avatar, { name: row.name, color: row.color, avatar: row.avatar, size: 'sm' }),
+                      h(
+                        'span',
+                        { className: 'db-mention-row-main' },
+                        h('span', { className: 'db-mention-row-name' }, row.kind === 'all' ? row.label : row.name),
+                        h('span', { className: 'db-mention-row-role' }, row.role === '' ? t('chat.dm') : row.role),
+                      ),
+                    )
+                  }),
+            )
+          : null,
         h('textarea', {
           ref: areaRef,
           className: 'db-input',
@@ -946,6 +1180,7 @@ function Composer(props) {
           onChange: function (event) {
             setValue(event.target.value)
             store.setDraft(chat.id, event.target.value)
+            updateMentionFrom(event.target.value, event.target.selectionStart === null ? event.target.value.length : event.target.selectionStart)
             resize()
           },
           onKeyDown: onKeyDown,
@@ -964,7 +1199,9 @@ function Composer(props) {
               setMenuOpen(!menuOpen)
             },
           }),
-          h('span', { className: 'db-composer-hint' }, attachments.length > 0 ? t('composer.count', { count: String(attachments.length), max: String(MAX_ATTACHMENTS) }) : t('chat.hint.send')),
+          groupChat === undefined || groupChat === null
+            ? h('span', { className: 'db-composer-hint' }, attachments.length > 0 ? t('composer.count', { count: String(attachments.length), max: String(MAX_ATTACHMENTS) }) : t('chat.hint.send'))
+            : h('span', { className: 'db-composer-hint db-speakers-hint' }, t('chat.speakers'), h('strong', null, speakersText())),
           running === undefined
             ? null
             : h(
@@ -1121,7 +1358,11 @@ function ChatPane(props) {
   if (chat.kind === 'group') {
     var memberCount = group === undefined ? 0 : (Array.isArray(group.memberIds) ? group.memberIds.length : 0)
     subtitle = t('chat.memberCount', { count: String(memberCount) })
-    if (group !== undefined) subtitle += ' · ' + (group.replyMode === 'admin' ? t('groups.form.replyMode.admin') : t('groups.form.replyMode.all'))
+    if (group !== undefined) {
+      subtitle += ' · ' + (group.replyMode === 'admin' ? t('groups.form.replyMode.admin') : t('groups.form.replyMode.all'))
+      var speakers = group.maxSpeakers === undefined || group.maxSpeakers === null ? 3 : Number(group.maxSpeakers)
+      subtitle += ' · ' + (speakers > 0 ? t('chat.maxSpeakersTag', { n: String(speakers) }) : t('groups.speakersUnlimited'))
+    }
   } else if (bot !== undefined) {
     subtitle = bot.role === '' || bot.role === undefined ? t('chat.dm') : bot.role
   }
@@ -1195,7 +1436,20 @@ function ChatPane(props) {
       ),
     )
   } else if (visible.length === 0) {
-    timelineChildren.push(h('div', { key: 'empty', className: 'db-center-empty', style: { minBlockSize: '160px' } }, h('div', { className: 'db-empty-body' }, t('chat.noMessages'))))
+    timelineChildren.push(
+      h(
+        'div',
+        { key: 'empty', className: 'db-center-empty', style: { minBlockSize: '160px' } },
+        chat.kind === 'group'
+          ? h(
+              'div',
+              { className: 'db-empty-body db-group-empty' },
+              h(Icon, { name: 'users', size: 18 }),
+              h('p', null, t('chat.groupEmptyHint')),
+            )
+          : h('div', { className: 'db-empty-body' }, t('chat.noMessages')),
+      ),
+    )
   }
 
   return h(
@@ -1223,6 +1477,7 @@ function ChatPane(props) {
           { className: 'db-chat-title' },
           h('span', null, store.chatTitle(chat)),
           chat.pinned === true ? h(ui.Tag, { icon: 'pin' }, t('left.pinned')) : null,
+          chat.kind === 'group' ? h(ui.Tag, null, t('chat.groupTag')) : null,
           store.runningOf(chat.id) === undefined ? null : h(Spinner, null),
         ),
         h('div', { className: 'db-chat-sub' }, subtitle),
@@ -1241,6 +1496,16 @@ function ChatPane(props) {
             })
           },
         }),
+        chat.kind === 'group'
+          ? h(ui.IconButton, {
+              icon: 'inbox',
+              label: t('chat.decisions'),
+              title: t('chat.decisions'),
+              onClick: function () {
+                store.openDrawer('groups')
+              },
+            })
+          : null,
         h(ui.IconButton, {
           icon: 'users',
           label: t('groups.title'),
@@ -1276,4 +1541,12 @@ function ChatPane(props) {
   )
 }
 
-module.exports = { ChatPane: ChatPane, MessageRow: MessageRow, isHiddenMessage: isHiddenMessage, textOf: textOf }
+module.exports = {
+  ChatPane: ChatPane,
+  MessageRow: MessageRow,
+  isHiddenMessage: isHiddenMessage,
+  textOf: textOf,
+  mentionTokenAt: mentionTokenAt,
+  mentionCandidates: mentionCandidates,
+  speakerPreview: speakerPreview,
+}

@@ -23,6 +23,10 @@ export const PASS_RE = /^\s*\[?PASS\]?\s*[.。]?\s*$/i
 
 /** The largest hop limit a group may hold. 0 means "no limit". */
 export const HOP_LIMIT_MAX = 20
+/** The largest per-round speaker cap a group may hold. 0 means "no limit". */
+export const GROUP_SPEAKERS_MAX = 20
+/** The speaker cap a group uses when it does not configure one. */
+export const GROUP_SPEAKERS_DEFAULT = 3
 
 /** Longest summary handed over to the next hop. */
 export const HANDOVER_MAX = 600
@@ -151,9 +155,32 @@ export function hopLimit(group) {
 }
 
 /**
- * Who speaks first on a new group message: whoever it mentions, else the reply
- * mode decides. A group whose admin is not a member falls back to the first
- * member, because queueing an outsider silently empties the queue.
+ * The effective per-round speaker cap: 0 means no limit, and an unusable value
+ * falls back to the default so a hand-edited ledger cannot silence a group.
+ * @param {object} group - the group record.
+ * @returns {number} 0..20.
+ */
+export function groupSpeakers(group) {
+  const value = group?.maxSpeakers
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value) || value <= 0) return value === 0 ? 0 : GROUP_SPEAKERS_DEFAULT
+    return Math.min(Math.floor(value), GROUP_SPEAKERS_MAX)
+  }
+  if (typeof value === 'string' && /^\d+$/.test(value.trim())) {
+    const raw = Number(value.trim())
+    return raw > 0 ? Math.min(raw, GROUP_SPEAKERS_MAX) : 0
+  }
+  return GROUP_SPEAKERS_DEFAULT
+}
+
+/**
+ * Who speaks on a new group message.
+ *
+ * A mention is an explicit floor: only the mentioned members speak, in mention
+ * order (relay @-mentions may still extend the chain under the hop limit). With
+ * no mention the reply mode decides — the admin alone, or the first
+ * `maxSpeakers` members in roster order (0 = everyone; otherwise nobody sits out
+ * silently: the prompt says who is standing by).
  * @param {object} group - the group record.
  * @param {{ id: string, name: string }[]} bots - every Bot in the roster.
  * @param {string} text - the incoming user text.
@@ -166,10 +193,28 @@ export function groupQueue(group, bots, text) {
   const mentioned = mentionsIn(text, members)
   if (mentioned.length) return mentioned
   const admin = members.find(bot => bot.id === group.adminId)
-  const others = members.filter(bot => bot.id !== group.adminId)
-  if (group?.replyMode === 'all') return [...(admin ? [admin.id] : []), ...others.map(bot => bot.id)]
-  if (admin) return [admin.id]
-  return others.slice(0, 1).map(bot => bot.id)
+  if (group?.replyMode !== 'all') {
+    if (admin) return [admin.id]
+    return members.slice(0, 1).map(bot => bot.id)
+  }
+  const cap = groupSpeakers(group)
+  const ordered = members.map(bot => bot.id)
+  return cap === 0 ? ordered : ordered.slice(0, cap)
+}
+
+/**
+ * The decision lines of one group reply: the sentences a group note should keep
+ * even when the rest of the answer is chatty.
+ * @param {string} text - the reply.
+ * @returns {string[]} the decision sentences, in order.
+ */
+export function decisionSentences(text) {
+  const sentences = String(text ?? '')
+    .replace(/\r\n?/g, '\n')
+    .split(/(?<=[。！？!?；;\n])/u)
+    .map(sentence => sentence.trim())
+    .filter(sentence => sentence !== '')
+  return sentences.filter(sentence => /(结论|决定|约定)\s*[:：]/u.test(sentence) || /^(结论|决定|约定)/u.test(sentence))
 }
 
 /**
@@ -281,7 +326,20 @@ export function noteEntries(group) {
 export function appendNote(group, round) {
   const existing = noteEntries(group)
   const fresh = (Array.isArray(round) ? round : []).map(cleanNoteEntry).filter(Boolean)
-  return boundNote([...existing, ...fresh])
+  const key = (text) => neutralizeMarks(String(text ?? '')).replace(/\s+/g, '').toLowerCase()
+  const kept = [...existing]
+  // Dedupe: an entry already said (or already contained in a longer entry) is
+  // not repeated, which is what makes the automatic decision log idempotent.
+  const contains = (text) => {
+    const needle = key(text)
+    if (needle === '') return true
+    return kept.some(entry => key(entry.text).includes(needle))
+  }
+  for (const entry of fresh) {
+    if (contains(entry.text)) continue
+    kept.push(entry)
+  }
+  return boundNote(kept)
 }
 
 /**

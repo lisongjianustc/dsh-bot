@@ -130,6 +130,19 @@ test('services: group validation keeps the admin a member', async (t) => {
   await assert.rejects(() => services.groups.create({ name: 'Team', memberIds: [alice.id] }), (error) => error.code === 'invalid-request')
 })
 
+test('services: a group carries a per-round speaker cap', async (t) => {
+  const { services } = make(t)
+  const alice = await services.bots.create({ name: 'Alice' })
+  const bob = await services.bots.create({ name: 'Bob' })
+  const group = await services.groups.create({ name: 'Speakers', memberIds: [alice.id, bob.id], adminId: alice.id })
+  assert.equal(group.maxSpeakers, 3)
+  assert.equal((await services.stateView()).groups[0].maxSpeakers, 3)
+  const updated = await services.groups.update(group.id, { maxSpeakers: 0 })
+  assert.equal(updated.group.maxSpeakers, 0)
+  const capped = await services.groups.update(group.id, { maxSpeakers: 99 })
+  assert.equal(capped.group.maxSpeakers, 20)
+})
+
 test('services: a group note is written only for a note-keeping group', async (t) => {
   const { services } = make(t)
   const alice = await services.bots.create({ name: 'Alice' })

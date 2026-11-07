@@ -21,6 +21,7 @@ import {
   GROUP_NOTE_MARK,
   GROUP_NOTE_END,
   CONVERGE_MARK,
+  groupSpeakers,
   renderHandover,
   renderNote,
   selectGroupMessages,
@@ -134,6 +135,13 @@ export function briefFor({ bot, bots, groups, group, settings, note }) {
     lines.push(zh
       ? '群聊里不要调用 post_group（你已经在群里了）；需要别人接话时，用 @名字 提到对方。'
       : 'Do not call post_group inside a group (you are already there); mention another Bot with @name when you want it to speak next.')
+    const speakerCap = groupSpeakers(group)
+    lines.push(zh
+      ? `本轮发言路由：被 @ 的成员按 @ 顺序发言；没有被 @ 时，${group.replyMode === 'all' ? `按成员顺序最多 ${speakerCap === 0 ? '全部' : speakerCap} 人` : '只有群主发言'}；未轮到的成员待命，不要抢话，需要谁就 @ 谁。`
+      : `Speaking order: mentioned members speak in mention order; without a mention, ${group.replyMode === 'all' ? `up to ${speakerCap === 0 ? 'every' : speakerCap} member(s) in roster order` : 'only the admin speaks'}; everyone else stands by — do not jump in, mention the member you need.`)
+    lines.push(zh
+      ? '项目上的进度、问题、决策和派活优先发在这个群里，并 @ 相关成员；私聊只做一对一与敏感信息。'
+      : 'Project progress, questions, decisions and assignments belong in this group, with the relevant members mentioned; use private chats only for one-to-one or sensitive matters.')
     if (Number(group.maxHops) > 0) {
       lines.push(zh
         ? `这个群有接力上限（${group.maxHops} 跳）：一串接力到顶会收敛，最后一跳会被要求收口。`
@@ -164,8 +172,8 @@ export function briefFor({ bot, bots, groups, group, settings, note }) {
     }
   } else {
     lines.push(zh
-      ? '你在和用户私聊。'
-      : 'You are in a private chat with the user.')
+      ? '你在和用户私聊。项目上的进度、问题、决策和派活请优先发到项目群并 @ 相关成员；私聊只用于一对一沟通与敏感信息。'
+      : 'You are in a private chat with the user. Project progress, questions, decisions and assignments belong in a project group with the relevant members mentioned; use private chats only for one-to-one or sensitive matters.')
   }
   lines.push('')
   lines.push(zh ? '## 团队' : '## Team')
@@ -179,7 +187,7 @@ export function briefFor({ bot, bots, groups, group, settings, note }) {
   lines.push(`- bot_list_team → ${zh ? '列出 Bot 与群' : 'list Bots and groups'}`)
   if (bot.isMain) {
     lines.push(`- bot_create / bot_update / bot_delete → ${zh ? '增删改 Bot（仅主 Bot）' : 'create, update, delete a Bot (main only)'}`)
-    lines.push(`- bot_create_group / bot_update_group / bot_delete_group → ${zh ? '建群 / 改群 / 删群；成员写 id 或名字（仅主 Bot）' : 'create, update, delete a group; members are ids or names (main only)'}`)
+    lines.push(`- bot_create_group / bot_update_group / bot_delete_group → ${zh ? '建群 / 改群 / 删群；成员写 id 或名字（仅主 Bot）。建群后先发一条 kickoff：目标 / 分工 / 项目目录 / 验收标准' : 'create, update, delete a group; members are ids or names (main only). After creating one, post a kickoff: goal / assignment / project directories / acceptance'}`)
     lines.push(`- bot_create_schedule / bot_list_schedules / bot_delete_schedule → ${zh ? '管理定时任务' : 'manage scheduled tasks'}`)
   } else {
     lines.push(`- bot_create_schedule / bot_list_schedules → ${zh ? '你自己的定时任务' : 'your own scheduled tasks'}`)
@@ -248,10 +256,12 @@ export function renderMemoryBlock(selection, language = 'zh') {
  * @param {object[]} input.messages - the chat's messages.
  * @param {number} input.lastSeenSeq - the member's cursor.
  * @param {(botId: string) => { name?: string } | undefined} input.botName - roster lookup.
+ * @param {string[]} [input.speakers] - this round's speaking order, by display name.
+ * @param {number} [input.standby] - how many members are standing by.
  * @param {'zh'|'en'} language - prompt language.
  * @returns {{ text: string, cursor: number, pending: boolean, query: string }} the rendered snapshot.
  */
-export function renderGroupSnapshot({ group, bot, messages, lastSeenSeq, botName, language = 'zh' }) {
+export function renderGroupSnapshot({ group, bot, messages, lastSeenSeq, botName, language = 'zh', speakers, standby }) {
   const zh = language !== 'en'
   const snapshot = selectGroupMessages({ messages, lastSeenSeq, botId: bot.id, botName })
   const body = snapshot.lines.length > 0
@@ -274,6 +284,11 @@ export function renderGroupSnapshot({ group, bot, messages, lastSeenSeq, botName
         : `New messages in the group "${clean(group.name, 40)}" since your last turn:`,
       ...body,
       '',
+      Array.isArray(speakers) && speakers.length > 0
+        ? (zh
+            ? `本轮发言：${speakers.map(name => clean(name, 40)).join('、')}${Number(standby) > 0 ? `；其余 ${standby} 名成员待命` : ''}。`
+            : `Speaking this round: ${speakers.map(name => clean(name, 40)).join(', ')}${Number(standby) > 0 ? `; ${standby} member(s) stand by` : ''}.`)
+        : '',
       zh
         ? `现在是你的发言轮次（${clean(bot.name, 40)}）。请用群聊的语气回复；如果你没有新内容，只回复 [PASS]。`
         : `It is your turn (${clean(bot.name, 40)}). Reply in the group's voice; if you have nothing new, reply exactly [PASS].`,
@@ -303,7 +318,7 @@ export function renderGroupSnapshot({ group, bot, messages, lastSeenSeq, botName
  * @param {string} [input.query] - the memory query override.
  * @returns {{ text: string, memoryStamp: string, cursor: number, pending: boolean, commit: () => Promise<void> }} the turn text.
  */
-export function composeTurnText({ services, language = 'zh', bot, chat, group, input = '', handover, converge, query }) {
+export function composeTurnText({ services, language = 'zh', bot, chat, group, input = '', handover, converge, query, speakers, standby }) {
   const record = services.stampOf(chat.id, bot.id)
   let snapshot = { text: '', cursor: record.lastSeenSeq, pending: false, query: '' }
   if (group !== undefined && group !== null) {
@@ -314,6 +329,8 @@ export function composeTurnText({ services, language = 'zh', bot, chat, group, i
       lastSeenSeq: record.lastSeenSeq ?? 0,
       botName: (botId) => services.bots.get(botId),
       language,
+      speakers,
+      standby,
     })
   }
   // In a group the retrieval input is the newest message the Bot is answering,

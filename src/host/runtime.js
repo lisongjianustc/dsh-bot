@@ -722,12 +722,16 @@ export function createRuntime({ ctx, store, services, hub, config = {} }) {
     // explicit conclusions. Pure heuristics; nothing is injected until the entry
     // is accepted (a strong instruction is accepted automatically).
     try {
+      const chat = services.chats.get(state.chatId)
       const history = services.messages.list(state.chatId)
       const index = history.findIndex(message => message.id === state.messageId)
       const asked = index < 0 ? undefined : [...history.slice(0, index)].reverse().find(message => message.role === 'user')
-      const userText = typeof asked?.text === 'string' ? asked.text : ''
+      // In a group the USER text is considered once per round by the dispatcher;
+      // a per-member turn would otherwise queue the same sentence once per
+      // speaker. A private chat keeps the single-turn behavior.
+      const userText = chat?.kind === 'group' ? '' : (typeof asked?.text === 'string' ? asked.text : '')
       await autoMemoryApi?.consider?.({
-        chat: services.chats.get(state.chatId),
+        chat,
         bot: services.bots.get(state.botId),
         userText,
         botText: snapshot.text,

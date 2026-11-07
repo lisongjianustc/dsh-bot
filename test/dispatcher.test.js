@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
+import { createAutoMemory } from '../src/host/auto-memory.js'
 import { createDispatcher } from '../src/host/dispatcher.js'
 import { createServices } from '../src/host/services.js'
 import { createStore } from '../src/host/store.js'
@@ -40,6 +41,8 @@ function make(t) {
   const store = createStore(ctx, { dir })
   const services = createServices({ ctx, store })
   const runtime = fakeRuntime()
+  const autoMemory = createAutoMemory({ ctx, services, store })
+  runtime.autoMemory = autoMemory
   const dispatcher = createDispatcher({ ctx, services, runtime })
   t.after(async () => {
     dispatcher.dispose()
@@ -115,6 +118,76 @@ test('dispatcher: a reply that mentions another member appends it to the queue',
   assert.equal(runtime.sent.length, 2)
   assert.equal(runtime.sent[0].botId, team.alice.id)
   assert.equal(runtime.sent[1].botId, team.bob.id)
+})
+
+test('dispatcher: a mention is the only speaker list, even in all mode', async (t) => {
+  const { services, runtime, dispatcher } = make(t)
+  const team = await seedTeam(services, dispatcher, { replyMode: 'all', maxHops: 0 })
+  runtime.replies.push({ text: 'Bob answers alone' })
+  await team.send('@Bob 只看这个')
+  assert.equal(runtime.sent.length, 1)
+  assert.equal(runtime.sent[0].botId, team.bob.id)
+})
+
+test('dispatcher: all mode caps speakers at maxSpeakers and 0 means everyone', async (t) => {
+  const { services, runtime, dispatcher } = make(t)
+  const bots = []
+  for (const name of ['A', 'B', 'C', 'D', 'E']) bots.push(await services.bots.create({ name }))
+  const group = await services.groups.create({
+    name: 'Capped',
+    memberIds: bots.map(bot => bot.id),
+    adminId: bots[0].id,
+    replyMode: 'all',
+    maxSpeakers: 2,
+  })
+  const chat = services.chats.findGroupChat(group.id)
+  const send = async (text) => {
+    const message = await services.messages.append(chat.id, { role: 'user', text, status: 'done', parts: [{ type: 'text', text }] })
+    await dispatcher.handle(chat, message)
+    await dispatcher.idle(chat.id)
+  }
+  await send('hello team')
+  assert.equal(runtime.sent.length, 2)
+  assert.deepEqual(runtime.sent.map(entry => entry.botId), [bots[0].id, bots[1].id])
+  await services.groups.update(group.id, { maxSpeakers: 0 })
+  runtime.sent.length = 0
+  await send('everyone please')
+  assert.equal(runtime.sent.length, 5)
+})
+
+test('dispatcher: a group user message is remembered once per round, not once per speaker', async (t) => {
+  const { services, dispatcher } = make(t)
+  const team = await seedTeam(services, dispatcher, { replyMode: 'all', maxHops: 0 })
+  await team.send('请记住：我们统一用中文。')
+  const teamMemory = services.memory.list({ scope: 'team' })
+  assert.equal(teamMemory.length, 1)
+  assert.equal(teamMemory[0].auto, true)
+  assert.equal(services.memoryCandidates.list().length, 0)
+})
+
+test('dispatcher: a mentioned Bot owns a group "你以后…" order', async (t) => {
+  const { services, dispatcher } = make(t)
+  const team = await seedTeam(services, dispatcher, { replyMode: 'all', maxHops: 0 })
+  await team.send('@Bob 请记住：你以后回答先给结论。')
+  assert.equal(services.memory.list({ scope: 'bot', targetBotId: team.bob.id, botId: team.bob.id }).length, 1)
+  assert.equal(services.memory.list({ scope: 'bot', targetBotId: team.alice.id, botId: team.alice.id }).length, 0)
+  assert.equal(services.memory.list({ scope: 'team' }).length, 0)
+  assert.equal(services.memoryCandidates.list().length, 0)
+})
+
+test('dispatcher: the group decision log keeps explicit conclusions once', async (t) => {
+  const { services, runtime, dispatcher } = make(t)
+  const team = await seedTeam(services, dispatcher, { useNote: true, maxHops: 0, replyMode: 'admin' })
+  runtime.replies.push({ text: '先聊两句。\n结论：用方案 A。' })
+  await team.send('@Alice 定一下')
+  let note = services.groupNote(services.groups.get(team.group.id))
+  assert.ok(note.some(entry => /结论：用方案 A/.test(entry.text)))
+  const count = note.length
+  runtime.replies.push({ text: '结论：用方案 A。' })
+  await team.send('@Alice 再确认一次')
+  note = services.groupNote(services.groups.get(team.group.id))
+  assert.equal(note.filter(entry => /结论：用方案 A/.test(entry.text)).length, 1)
+  assert.equal(note.length, count)
 })
 
 test('dispatcher: [PASS] skips a member and the queue moves on', async (t) => {

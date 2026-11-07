@@ -175,13 +175,14 @@ function entryIcon(kind, size) {
   return h(Icon, { name: 'file', size: size })
 }
 
-/** One preview pane body. */
+/** One preview pane body (header lives in the panel shell). */
 function PreviewBody(props) {
   var t = props.t
   var store = props.store
   var preview = props.preview
-  if (preview === null || preview === undefined) return h('div', { className: 'db-file-empty' }, t('files.pickPreview'))
-
+  if (preview === null || preview === undefined) {
+    return h('div', { className: 'db-file-empty' }, t('files.pickPreview'))
+  }
   if (preview.kind === 'loading') return h('div', { className: 'db-file-loading' }, h('span', { className: 'db-spinner' }), t('files.loading'))
   if (preview.kind === 'error') {
     return h(
@@ -219,39 +220,15 @@ function PreviewBody(props) {
     )
   }
   var text = String(preview.text === undefined || preview.text === null ? '' : preview.text)
-  var head = h(
-    'div',
-    { className: 'db-file-preview-head' },
-    h('span', { className: 'db-file-preview-name', title: preview.path }, basename(preview.path)),
-    h('span', { className: 'db-file-preview-meta' }, preview.size === undefined ? '' : formatSize(preview.size)),
-    h(ui.IconButton, {
-      icon: 'copy',
-      size: 11,
-      label: t('files.copy'),
-      title: t('files.copy'),
-      onClick: function () {
-        try {
-          if (typeof navigator !== 'undefined' && navigator.clipboard !== undefined) navigator.clipboard.writeText(text)
-        } catch (error) {
-          /* clipboard unavailable: the text stays selectable */
-        }
-      },
-    }),
-  )
   if (preview.kind === 'markdown') {
     return h(
       'div',
-      { className: 'db-file-preview' },
-      head,
-      h(
-        'div',
-        { className: 'db-file-md' },
-        markdown.render(text, undefined, {
-          fileLink: function (target) {
-            store.openFile(target)
-          },
-        }),
-      ),
+      { className: 'db-file-md' },
+      markdown.render(text, undefined, {
+        fileLink: function (target) {
+          store.openFile(target)
+        },
+      }),
     )
   }
   var lines = text.split('\n')
@@ -273,15 +250,26 @@ function PreviewBody(props) {
   }
   return h(
     'div',
-    { className: 'db-file-preview' },
-    head,
-    h('div', { className: 'db-file-code' }, rows),
+    { className: 'db-file-code' },
+    rows,
     truncated ? h('div', { className: 'db-file-truncated' }, t('files.truncated', { max: String(TEXT_PREVIEW_MAX_LINES) })) : null,
   )
 }
 
+/** Copy the current preview text to the clipboard (best effort). */
+function copyPreview(preview) {
+  if (preview === null || preview === undefined) return
+  var text = preview.kind === 'markdown' || preview.kind === 'text' ? String(preview.text === undefined ? '' : preview.text) : ''
+  if (text === '') return
+  try {
+    if (typeof navigator !== 'undefined' && navigator.clipboard !== undefined) navigator.clipboard.writeText(text)
+  } catch (error) {
+    /* clipboard unavailable: the text stays selectable */
+  }
+}
+
 /**
- * The file browser itself.
+ * The file browser (browse + preview tabs).
  *
  * `props.initial` lets the smoke test seed a fully-loaded state; production
  * call sites never pass it and the component loads through the Host.
@@ -291,7 +279,9 @@ function FilePanel(props) {
   var store = props.store
   var initial = props.initial === undefined || props.initial === null ? {} : props.initial
   var chatId = store.selectedChatId === undefined || store.selectedChatId === null ? '' : String(store.selectedChatId)
-  var requestPath = store.fileRequest === null || store.fileRequest === undefined ? '' : String(store.fileRequest.path === undefined ? '' : store.fileRequest.path)
+  var request = store.fileRequest === null || store.fileRequest === undefined ? { path: '', nonce: 0 } : store.fileRequest
+  var requestPath = String(request.path === undefined ? '' : request.path)
+  var tab = initial.tab === 'preview' || initial.tab === 'browse' ? initial.tab : store.fileTab === 'preview' ? 'preview' : 'browse'
 
   var pairRoots = React.useState(Array.isArray(initial.roots) ? initial.roots : [])
   var roots = pairRoots[0]
@@ -320,9 +310,16 @@ function FilePanel(props) {
   var pairRootsError = React.useState(initial.rootsError === undefined ? '' : initial.rootsError)
   var rootsError = pairRootsError[0]
   var setRootsError = pairRootsError[1]
+  var listRef = React.useRef(null)
+  var contentRef = React.useRef(null)
+  var seeded = initial.roots !== undefined || initial.entries !== undefined
 
   function resolveChat() {
     return store.selectedChatId === undefined || store.selectedChatId === null ? '' : String(store.selectedChatId)
+  }
+
+  function currentTab() {
+    return store.fileTab === 'preview' ? 'preview' : 'browse'
   }
 
   function showDir(path, keepPreview) {
@@ -335,6 +332,7 @@ function FilePanel(props) {
         var resolved = body !== null && typeof body === 'object' && typeof body.path === 'string' ? body.path : path
         setCurrentPath(resolved)
         setEntries(sortEntries(body !== null && typeof body === 'object' && Array.isArray(body.entries) ? body.entries : []))
+        store.rememberFileView(id, { browsePath: resolved })
         if (keepPreview !== true) setPreview(null)
       },
       function (failure) {
@@ -345,8 +343,10 @@ function FilePanel(props) {
     )
   }
 
-  function showPreview(path) {
+  function showPreview(path, switchTab) {
     var id = resolveChat()
+    store.rememberFileView(id, { previewPath: path })
+    if (switchTab !== false) store.setFileTab('preview')
     if (isImagePath(path)) {
       setPreview({ kind: 'image', path: path, name: basename(path), url: store.fsRawUrl(id, path) })
       return
@@ -372,16 +372,14 @@ function FilePanel(props) {
 
   function openTarget(target) {
     var id = resolveChat()
-    // A chain that names a file goes straight to its preview; listing first
-    // would make a file path look like an empty directory on hosts that answer
-    // `list` leniently.
     if (/\.[A-Za-z][A-Za-z0-9]{0,7}$/.test(basename(target))) {
       var dir = dirname(target)
       setCurrentPath(dir === '' ? rootPath : dir)
       showDir(dir === '' ? rootPath : dir, true)
-      showPreview(target)
+      showPreview(target, true)
       return
     }
+    store.setFileTab('browse')
     store.fsList(id, target).then(
       function (body) {
         var resolved = body !== null && typeof body === 'object' && typeof body.path === 'string' ? body.path : target
@@ -391,16 +389,16 @@ function FilePanel(props) {
         setEntries(sortEntries(body !== null && typeof body === 'object' && Array.isArray(body.entries) ? body.entries : []))
         setPreview(null)
         setError('')
+        store.rememberFileView(id, { browsePath: resolved })
       },
       function () {
-        var dir = dirname(target)
-        showDir(dir, true)
-        showPreview(target)
+        showDir(dirname(target), true)
+        showPreview(target, true)
       },
     )
   }
 
-  function start(request) {
+  function start(requestedPath) {
     var id = resolveChat()
     setRootsError('')
     setError('')
@@ -413,8 +411,19 @@ function FilePanel(props) {
         var dir = first !== null && typeof first.path === 'string' ? first.path : ''
         setRootPath(dir)
         setRootTitle(first !== null && typeof first.title === 'string' ? first.title : '')
-        if (request !== '') openTarget(request)
-        else showDir(dir, false)
+        var saved = store.fileViewOf(id)
+        if (requestedPath !== '') {
+          openTarget(requestedPath)
+          return
+        }
+        var browsePath = typeof saved.browsePath === 'string' && saved.browsePath !== '' ? saved.browsePath : dir
+        showDir(browsePath, true)
+        if (saved.tab === 'preview' && typeof saved.previewPath === 'string' && saved.previewPath !== '') {
+          showPreview(saved.previewPath, false)
+          store.setFileTab('preview')
+        } else {
+          store.setFileTab('browse')
+        }
       },
       function (failure) {
         setRoots([])
@@ -423,11 +432,10 @@ function FilePanel(props) {
     )
   }
 
-  // React to chat switches and to one-shot requests from chat links.
-  var requestNonce = store.fileRequest === null || store.fileRequest === undefined ? 0 : store.fileRequest.nonce
+  var requestNonce = request.nonce === undefined ? 0 : request.nonce
   React.useEffect(
     function () {
-      if (initial.roots !== undefined || initial.entries !== undefined) return
+      if (seeded) return
       start(requestPath)
     },
     [chatId, requestNonce],
@@ -449,6 +457,21 @@ function FilePanel(props) {
     [],
   )
 
+  // Restore each tab's scroll position for this chat.
+  React.useEffect(
+    function () {
+      if (seeded) return
+      var view = store.fileViewOf(chatId)
+      if (tab === 'browse' && listRef.current !== null && listRef.current !== undefined) {
+        listRef.current.scrollTop = typeof view.browseScroll === 'number' ? view.browseScroll : 0
+      }
+      if (tab === 'preview' && contentRef.current !== null && contentRef.current !== undefined) {
+        contentRef.current.scrollTop = typeof view.previewScroll === 'number' ? view.previewScroll : 0
+      }
+    },
+    [tab, currentPath, listing, preview === null ? '' : preview.path],
+  )
+
   var crumbs = breadcrumbOf(rootPath, currentPath, rootTitle)
   var upPath = ''
   if (rootPath !== '' && currentPath !== '' && currentPath !== rootPath && currentPath.indexOf(rootPath + '/') === 0) {
@@ -465,6 +488,7 @@ function FilePanel(props) {
         onChange: function (value) {
           setRootPath(value)
           for (var i = 0; i < roots.length; i += 1) if (roots[i].path === value) setRootTitle(roots[i].title)
+          store.setFileTab('browse')
           showDir(value, false)
         },
       },
@@ -485,7 +509,7 @@ function FilePanel(props) {
         title: entry.path === undefined ? entry.name : entry.path,
         onClick: function () {
           if (kind === 'dir') showDir(entry.path, false)
-          else showPreview(entry.path)
+          else showPreview(entry.path, true)
         },
       },
       h('span', { className: 'db-file-row-icon' }, entryIcon(kind, 14)),
@@ -494,58 +518,107 @@ function FilePanel(props) {
     )
   })
 
-  var body
-  if (rootsError !== '') {
-    body = h('div', { className: 'db-file-error' }, h(Icon, { name: 'alert', size: 13 }), h('span', null, rootsError))
-  } else if (roots.length === 0) {
-    body = h('div', { className: 'db-file-empty' }, t('files.noRoots'))
-  } else {
-    body = h(
-      'div',
-      { className: 'db-file-body' },
-      h(
-        'div',
-        { className: 'db-file-nav' },
-        upPath === ''
-          ? null
-          : h(ui.IconButton, {
-              icon: 'chevron-left',
-              label: t('files.up'),
-              title: t('files.up'),
-              onClick: function () {
-                showDir(upPath, false)
-              },
-            }),
-        h(
-          'div',
-          { className: 'db-file-crumbs' },
-          crumbs.map(function (crumb, index) {
-            return h(
-              'button',
+  var browsePane = h(
+    'div',
+    { className: 'db-file-pane is-browse' },
+    rootsError !== ''
+      ? h('div', { className: 'db-file-error' }, h(Icon, { name: 'alert', size: 13 }), h('span', null, rootsError))
+      : roots.length === 0
+        ? h('div', { className: 'db-file-empty' }, t('files.noRoots'))
+        : h(
+            'div',
+            { className: 'db-file-browse' },
+            h(
+              'div',
+              { className: 'db-file-nav' },
+              upPath === ''
+                ? null
+                : h(ui.IconButton, {
+                    icon: 'chevron-left',
+                    label: t('files.up'),
+                    title: t('files.up'),
+                    onClick: function () {
+                      showDir(upPath, false)
+                    },
+                  }),
+              h(
+                'div',
+                { className: 'db-file-crumbs' },
+                crumbs.map(function (crumb, index) {
+                  return h(
+                    'button',
+                    {
+                      key: 'crumb-' + index,
+                      type: 'button',
+                      className: 'db-file-crumb' + (index === crumbs.length - 1 ? ' is-current' : ''),
+                      onClick: function () {
+                        showDir(crumb.path, false)
+                      },
+                    },
+                    crumb.label,
+                  )
+                }),
+              ),
+            ),
+            error === '' ? null : h('div', { className: 'db-file-error' }, h(Icon, { name: 'alert', size: 13 }), h('span', null, error)),
+            h(
+              'div',
               {
-                key: 'crumb-' + index,
-                type: 'button',
-                className: 'db-file-crumb' + (index === crumbs.length - 1 ? ' is-current' : ''),
-                onClick: function () {
-                  showDir(crumb.path, false)
+                className: 'db-file-list',
+                ref: listRef,
+                onScroll: function (event) {
+                  store.rememberFileView(chatId, { browseScroll: event.target.scrollTop })
                 },
               },
-              crumb.label,
-            )
-          }),
-        ),
-      ),
-      error === '' ? null : h('div', { className: 'db-file-error' }, h(Icon, { name: 'alert', size: 13 }), h('span', null, error)),
-      h(
-        'div',
-        { className: 'db-file-list' },
-        listing ? h('div', { className: 'db-file-loading' }, h('span', { className: 'db-spinner' }), t('files.loading')) : null,
-        !listing && rows.length === 0 ? h('div', { className: 'db-file-empty' }, t('files.empty')) : null,
-        rows,
-      ),
+              listing ? h('div', { className: 'db-file-loading' }, h('span', { className: 'db-spinner' }), t('files.loading')) : null,
+              !listing && rows.length === 0 ? h('div', { className: 'db-file-empty' }, t('files.empty')) : null,
+              rows,
+            ),
+          ),
+  )
+
+  var previewName = preview === null || preview === undefined ? '' : basename(preview.path)
+  var previewSize = preview === null || preview === undefined || preview.size === undefined ? '' : formatSize(preview.size)
+  var previewPane = h(
+    'div',
+    { className: 'db-file-pane is-preview' },
+    h(
+      'div',
+      { className: 'db-file-preview-head' },
+      h(ui.IconButton, {
+        icon: 'chevron-left',
+        label: t('files.back'),
+        title: t('files.back'),
+        onClick: function () {
+          store.setFileTab('browse')
+        },
+      }),
+      h('span', { className: 'db-file-preview-name', title: preview === null || preview === undefined ? '' : String(preview.path) }, previewName),
+      h('span', { className: 'db-file-preview-meta' }, previewSize),
+      preview !== null && preview !== undefined && (preview.kind === 'markdown' || preview.kind === 'text')
+        ? h(ui.IconButton, {
+            icon: 'copy',
+            size: 11,
+            label: t('files.copy'),
+            title: t('files.copy'),
+            onClick: function () {
+              copyPreview(preview)
+            },
+          })
+        : null,
+    ),
+    h(
+      'div',
+      {
+        className: 'db-file-content',
+        ref: contentRef,
+        onScroll: function (event) {
+          store.rememberFileView(chatId, { previewScroll: event.target.scrollTop })
+        },
+      },
       h(PreviewBody, { t: t, store: store, preview: preview, chatId: chatId }),
-    )
-  }
+    ),
+  )
 
   return h(
     'aside',
@@ -555,10 +628,40 @@ function FilePanel(props) {
       { className: 'db-files-head' },
       h(Icon, { name: 'folder', size: 14 }),
       h('span', { className: 'db-files-title' }, t('files.title')),
-      roots.length > 0 ? h('div', { className: 'db-files-root' }, rootSelect) : null,
+      h(
+        'div',
+        { className: 'db-files-tabs', role: 'tablist' },
+        h(
+          'button',
+          {
+            type: 'button',
+            role: 'tab',
+            'aria-selected': tab === 'browse',
+            className: 'db-files-tab' + (tab === 'browse' ? ' is-active' : ''),
+            onClick: function () {
+              store.setFileTab('browse')
+            },
+          },
+          t('files.browse'),
+        ),
+        h(
+          'button',
+          {
+            type: 'button',
+            role: 'tab',
+            'aria-selected': tab === 'preview',
+            className: 'db-files-tab' + (tab === 'preview' ? ' is-active' : ''),
+            onClick: function () {
+              store.setFileTab('preview')
+            },
+          },
+          t('files.preview'),
+        ),
+      ),
+      tab === 'browse' && roots.length > 0 ? h('div', { className: 'db-files-root' }, rootSelect) : null,
       h(ui.IconButton, { icon: 'x', label: t('files.close'), title: t('files.close'), onClick: function () { store.closeFile() } }),
     ),
-    body,
+    tab === 'browse' ? browsePane : previewPane,
   )
 }
 

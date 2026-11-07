@@ -882,6 +882,37 @@ test('api: automatic memory writes strong instructions and queues preferences', 
   assert.equal(invalid.status, 400)
 })
 
+test('api: a group user message is remembered once, not once per speaker', async (t) => {
+  const host = makeHost(t)
+  const alice = (await host.call('POST', '/bot', { body: { action: 'create', bot: { name: 'Alice' } } })).body.state.bots[0]
+  const bob = (await host.call('POST', '/bot', { body: { action: 'create', bot: { name: 'Bob' } } })).body.state.bots[1]
+  const carol = (await host.call('POST', '/bot', { body: { action: 'create', bot: { name: 'Carol' } } })).body.state.bots[2]
+  const group = await host.call('POST', '/group', {
+    body: { action: 'create', group: { name: 'Team', memberIds: [alice.id, bob.id, carol.id], adminId: alice.id, replyMode: 'all', maxSpeakers: 3 } },
+  })
+  const groupChat = group.body.state.chats.find(chat => chat.groupId === group.body.state.groups[0].id)
+  const memoryList = async () => (await host.call('POST', '/memory', { body: { action: 'list', scope: 'team' } })).body
+  const totalBotReplies = async () => {
+    const page = await host.call('GET', `/messages?chatId=${encodeURIComponent(groupChat.id)}`)
+    return page.body.messages.filter(message => message.role === 'bot' && message.status === 'done').length
+  }
+  // All three members speak; the user sentence must be considered once.
+  await host.call('POST', '/chat', { body: { action: 'send', chatId: groupChat.id, text: '请记住：我们统一用中文。' } })
+  assert.ok(await waitFor(async () => (await totalBotReplies()) >= 3))
+  assert.ok(await waitFor(async () => (await memoryList()).entries.filter(entry => entry.auto === true).length === 1))
+  const afterFirst = await memoryList()
+  assert.equal(afterFirst.entries.filter(entry => /统一用中文/.test(entry.text)).length, 1)
+  assert.deepEqual(afterFirst.candidates, [])
+  // An operational instruction ("用一句话…不要调用工具") is never captured.
+  await host.call('POST', '/chat', {
+    body: { action: 'send', chatId: groupChat.id, text: '@Alice 用一句话说明你负责什么，不要调用工具。' },
+  })
+  assert.ok(await waitFor(async () => (await totalBotReplies()) >= 4))
+  const afterSecond = await memoryList()
+  assert.equal(afterSecond.entries.length, afterFirst.entries.length)
+  assert.deepEqual(afterSecond.candidates, [])
+})
+
 test('api: schedules are created, listed and deleted through the route', async (t) => {
   const host = makeHost(t)
   const bot = (await host.call('POST', '/bot', { body: { action: 'create', bot: { name: 'Alice' } } })).body.state.bots[0]

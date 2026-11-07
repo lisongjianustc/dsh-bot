@@ -43,6 +43,59 @@ function isBlockStart(line) {
   return false
 }
 
+/** Split one plain text chunk into text nodes and `@mention` chips. */
+function mentionPieces(text, names, keyPrefix) {
+  var source = String(text === undefined || text === null ? '' : text)
+  var list = Array.isArray(names) ? names.filter(function (name) { return typeof name === 'string' && name !== '' }) : []
+  if (list.length === 0) return [source]
+  var sorted = list.slice().sort(function (a, b) { return b.length - a.length })
+  var pieces = []
+  var buffer = ''
+  var index = 0
+  var seq = 0
+  function flushBuffer() {
+    if (buffer !== '') {
+      pieces.push(buffer)
+      buffer = ''
+    }
+  }
+  while (index < source.length) {
+    var char = source.charAt(index)
+    if (char !== '@' || (index > 0 && /[A-Za-z0-9_]/.test(source.charAt(index - 1)))) {
+      buffer += char
+      index += 1
+      continue
+    }
+    var matched = null
+    for (var i = 0; i < sorted.length; i += 1) {
+      var name = sorted[i]
+      if (source.slice(index + 1, index + 1 + name.length).toLowerCase() !== name.toLowerCase()) continue
+      var after = source.charAt(index + 1 + name.length)
+      if (after !== '' && /[A-Za-z0-9_]/.test(after)) continue
+      matched = name
+      break
+    }
+    if (matched === null) {
+      buffer += char
+      index += 1
+      continue
+    }
+    flushBuffer()
+    var all = matched.toLowerCase() === 'all'
+    pieces.push(
+      h(
+        'span',
+        { key: keyPrefix + '-mention-' + seq, className: 'db-mention' + (all ? ' is-all' : '') },
+        '@' + matched,
+      ),
+    )
+    seq += 1
+    index += matched.length + 1
+  }
+  flushBuffer()
+  return pieces
+}
+
 /**
  * Whether a string looks like a local file reference the workbench can open.
  * Absolute and relative POSIX paths, plus bare filenames with an extension.
@@ -68,10 +121,15 @@ function inlineNodes(text, keyPrefix, options) {
   var prefix = keyPrefix === undefined ? 'i' : keyPrefix
 
   function flush() {
-    if (buffer !== '') {
+    if (buffer === '') return
+    var names = Array.isArray(opts.mentionNames) ? opts.mentionNames : null
+    if (names !== null && names.length > 0) {
+      var pieces = mentionPieces(buffer, names, prefix)
+      for (var pi = 0; pi < pieces.length; pi += 1) nodes.push(pieces[pi])
+    } else {
       nodes.push(buffer)
-      buffer = ''
     }
+    buffer = ''
   }
 
   function push(element) {
@@ -540,4 +598,4 @@ function render(text, cursorClass, options) {
   return blocks
 }
 
-module.exports = { render: render, inlineNodes: inlineNodes, isFilePath: isFilePath }
+module.exports = { render: render, inlineNodes: inlineNodes, isFilePath: isFilePath, mentionPieces: mentionPieces }

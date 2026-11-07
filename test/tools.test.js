@@ -8,6 +8,15 @@ import { createServices } from '../src/host/services.js'
 import { createStore } from '../src/host/store.js'
 import { TOOL_NAMES, registerTools } from '../src/host/tools.js'
 
+async function waitFor(predicate, timeoutMs = 2000) {
+  const started = Date.now()
+  while (Date.now() - started < timeoutMs) {
+    if (await predicate()) return true
+    await new Promise(resolve => setTimeout(resolve, 5))
+  }
+  return false
+}
+
 function make(t) {
   const dir = mkdtempSync(join(tmpdir(), 'dsh-bot-tools-'))
   t.after(() => rmSync(dir, { recursive: true, force: true }))
@@ -260,8 +269,10 @@ test('tools: group tools pass project directories and the reset flag through', a
     name: 'Project',
     members: ['Bob'],
     workspaces: [join(dir, 'projA')],
+    max_speakers: 4,
   }, { agent: { id: 'session-alice' } })
   assert.equal(created.ok, true)
+  assert.equal(created.group.maxSpeakers, 4)
   assert.equal(created.group.workspaces.length, 1)
   assert.equal(created.group.workspaces[0].title, 'projA')
   assert.match(created.group.workspaces[0].path, /projA$/)
@@ -270,12 +281,22 @@ test('tools: group tools pass project directories and the reset flag through', a
   const updated = await updateGroup.execute({
     group: 'Project',
     workspaces: [join(dir, 'projB')],
+    max_speakers: 0,
     reset_sessions: true,
   }, { agent: { id: 'session-alice' } })
   assert.equal(updated.ok, true)
   assert.equal(updated.group.workspaces[0].title, 'projB')
+  assert.equal(updated.group.maxSpeakers, 0)
   assert.equal(updated.sessionsReset, true)
   assert.equal(services.chats.sessionOf(groupChat.id, alice.id), undefined)
+  // A group-origin dispatch results relay lands in the group chat.
+  await services.chats.setSession(groupChat.id, alice.id, { sessionId: 'session-group' })
+  const dispatch = captured.find(entry => entry.definition.name === 'bot_dispatch_tasks').definition
+  const receipt = await dispatch.execute({ tasks: [{ to: 'Bob', message: 'group task' }] }, { agent: { id: 'session-group' } })
+  assert.equal(receipt.ok, true)
+  assert.ok(await waitFor(() =>
+    services.messages.list(groupChat.id).some(message => message.id === `msg_task_${receipt.tasks[0].id}`)))
+  assert.equal(services.messages.list(services.chats.findDm(alice.id).id).some(message => message.role === 'relay'), false)
   void bob
 })
 

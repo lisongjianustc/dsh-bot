@@ -157,6 +157,7 @@ function buildDemoState() {
     notice: '我们正在把 Bot 工作台接进 DSH Web：先跑通私聊，再做群聊接力。',
     replyMode: 'all',
     maxHops: 3,
+    maxSpeakers: 3,
     handover: true,
     useNote: true,
     noteEntries: [
@@ -585,6 +586,8 @@ function createStore() {
     toolExpanded: Object.create(null),
     fileOpen: false,
     fileRequest: null,
+    fileTab: 'browse',
+    fileViews: Object.create(null),
     leftOpen: false,
     messages: Object.create(null),
     drafts: Object.create(null),
@@ -1648,11 +1651,40 @@ function createStore() {
 
   /* ---------------------------------------------------------- file panel */
 
+  /** The per-chat browse/preview state remembered across tab switches. */
+  function fileViewOf(chatId) {
+    var key = chatId === undefined || chatId === null ? '' : String(chatId)
+    if (key === '') return { tab: store.fileTab, browsePath: '', previewPath: '', browseScroll: 0, previewScroll: 0 }
+    if (store.fileViews[key] === undefined) {
+      store.fileViews[key] = { tab: store.fileTab, browsePath: '', previewPath: '', browseScroll: 0, previewScroll: 0 }
+    }
+    return store.fileViews[key]
+  }
+
+  /** Merge one patch into the remembered file view (no re-render). */
+  function rememberFileView(chatId, patch) {
+    if (chatId === undefined || chatId === null) return
+    var view = fileViewOf(chatId)
+    if (patch !== null && typeof patch === 'object') Object.assign(view, patch)
+  }
+
+  /** Switch between the browse and preview tabs of the file panel. */
+  function setFileTab(tab) {
+    var next = tab === 'preview' ? 'preview' : 'browse'
+    if (store.fileTab === next) return
+    store.fileTab = next
+    rememberFileView(store.selectedChatId, { tab: next })
+    notify()
+  }
+
   /** Open the right-hand file browser, optionally at one file/directory. */
-  function openFile(path) {
+  function openFile(path, tab) {
+    var target = typeof path === 'string' ? path : ''
     store.drawer = null
     store.fileOpen = true
-    store.fileRequest = { path: typeof path === 'string' ? path : '', nonce: Date.now() }
+    store.fileTab = tab === 'browse' ? 'browse' : 'preview'
+    store.fileRequest = { path: target, nonce: Date.now() }
+    rememberFileView(store.selectedChatId, { tab: store.fileTab })
     notify()
   }
 
@@ -2726,6 +2758,9 @@ function createStore() {
   store.setSearch = setSearch
   store.toggleLeft = toggleLeft
   store.openFile = openFile
+  store.setFileTab = setFileTab
+  store.fileViewOf = fileViewOf
+  store.rememberFileView = rememberFileView
   store.closeFile = closeFile
   store.toggleFile = toggleFile
   store.fsRoots = fsRoots

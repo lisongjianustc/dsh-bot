@@ -109,6 +109,26 @@ test('tasks: a dispatch is a receipt and the work runs in the background', async
   assert.equal(state.tasks[0].result.length > 0, true)
 })
 
+test('tasks: a group-origin dispatch posts its result back into the group chat', async (t) => {
+  const harness = makeHarness()
+  t.after(() => harness.close())
+  const { services, engine } = harness
+  const { alice, bob, group } = await seed(services)
+  const groupChat = services.chats.findGroupChat(group.id)
+  const receipt = await engine.dispatch({
+    ownerBot: alice,
+    originChat: groupChat,
+    entries: [{ to: 'Bob', message: 'report status' }],
+  })
+  assert.ok(await waitFor(() => services.tasks.list().every(task => task.status === 'done')))
+  const relay = services.messages.list(groupChat.id).find(message => message.id === `msg_task_${receipt.tasks[0].id}`)
+  assert.ok(relay, 'the task result was posted into the group chat')
+  assert.equal(relay.role, 'relay')
+  // The DM chat of the caller did not receive the group's task result.
+  assert.equal(services.messages.list(services.chats.findDm(alice.id).id).some(message => message.role === 'relay'), false)
+  void bob
+})
+
 test('tasks: request_id is idempotent for the same work and conflicts for different work', async (t) => {
   const harness = makeHarness()
   t.after(() => harness.close())

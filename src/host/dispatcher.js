@@ -16,6 +16,7 @@
 import { BotError, describeError } from './errors.js'
 import {
   CONVERGE_MARK,
+  decisionSentences,
   groupQueue,
   handoverSummary,
   hopLimit,
@@ -169,6 +170,17 @@ export function createDispatcher({ ctx, services, runtime }) {
     let paused
     let converged
     const queue = groupQueue(group, services.bots.list(), sourceText)
+    // Automatic memory: the user's message is considered ONCE for the whole
+    // round. Per-member turns only ever contribute their own conclusions.
+    try {
+      await runtime.autoMemory?.considerUser?.({
+        chat,
+        group,
+        userText: sourceText,
+      })
+    } catch (error) {
+      log('warn', 'the automatic memory pass for the group message failed', error)
+    }
     const lastResult = { status: 'pass', text: '', toolCount: 0 }
     try {
       while (queue.length > 0 && !loop.cancelled && !disposed && (generations.get(chat.id) ?? 0) === generation) {
@@ -184,6 +196,8 @@ export function createDispatcher({ ctx, services, runtime }) {
         const handover = fresh.handover === true && lastConclusion !== undefined
           ? { from: lastConclusion.name, text: handoverSummary({ reply: lastConclusion.text }) }
           : undefined
+        const speakers = [bot.name, ...queue.map(id => services.bots.get(id)?.name).filter(Boolean)]
+        const standby = Math.max(0, fresh.memberIds.length - new Set([bot.id, ...queue]).size)
         const prompt = composeTurnText({
           services,
           language: 'zh',
@@ -192,6 +206,8 @@ export function createDispatcher({ ctx, services, runtime }) {
           group: fresh,
           handover,
           query: '',
+          speakers,
+          standby,
         })
         hops += 1
         bumpBotLoad(bot.id, 1)
@@ -218,6 +234,11 @@ export function createDispatcher({ ctx, services, runtime }) {
         if (result.text !== '') {
           lastConclusion = { botId: bot.id, name: bot.name, text: clip(result.text, CONCLUSION_MAX), ts: Date.now() }
           noteRound.push({ speaker: bot.name, text: result.text })
+          // The group's decision log: explicit conclusions are kept even when the
+          // chatty tail of the reply would fall outside the note budget.
+          if (fresh.useNote === true) {
+            for (const sentence of decisionSentences(result.text)) noteRound.push({ speaker: bot.name, text: sentence })
+          }
         }
         const next = mentionsIn(result.text, membersOf(fresh), bot.id)
         if (limit > 0 && hops >= limit && next.length > 0) {
@@ -282,7 +303,12 @@ export function createDispatcher({ ctx, services, runtime }) {
       const result = await rounds.run(() => runtime.send({ chat, bot, text: prompt.text, kind: 'group' }))
       if (result.status === 'done' || result.status === 'pass') {
         await prompt.commit()
-        if (result.text !== '') noteRound.push({ speaker: bot.name, text: result.text })
+        if (result.text !== '') {
+          noteRound.push({ speaker: bot.name, text: result.text })
+          if (group.useNote === true) {
+            for (const sentence of decisionSentences(result.text)) noteRound.push({ speaker: bot.name, text: sentence })
+          }
+        }
       } else if (result.status === 'error') {
         log('warn', 'the convergence turn failed; the hop-limit notice stands on its own', result.error)
       }

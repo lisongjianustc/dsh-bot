@@ -128,6 +128,7 @@ export function registerTools({ ctx, services, dispatcher, runtime }) {
     notice: group.notice ?? '',
     replyMode: group.replyMode ?? 'admin',
     maxHops: group.maxHops ?? 0,
+    maxSpeakers: group.maxSpeakers ?? 3,
     handover: group.handover === true,
     useNote: group.useNote === true,
     workspaces: (group.workspaces ?? []).map(workspace => ({ ...workspace })),
@@ -240,7 +241,7 @@ export function registerTools({ ctx, services, dispatcher, runtime }) {
     }),
     defineTool({
       name: 'bot_create_group',
-      description: 'Create a group chat with the named Bots. Main Bot only. members accept Bot ids or names (at least one); you join automatically, and the admin defaults to you and always ends up a member. The group gets a real chat immediately. Chinese: 建群/拉群/组建群聊.',
+      description: 'Create a project group chat with the named Bots. Main Bot only. members accept Bot ids or names (at least one); you join automatically, and the admin defaults to you and always ends up a member. After creating it, post a kickoff message (goal / assignment / project directories / acceptance) instead of leaving the group empty. The group gets a real chat immediately. Chinese: 建群/拉群/组建群聊.',
       parameters: schema({
         name: STRING('group name, at most 24 characters, unique, no @ or line break'),
         members: { type: 'array', items: { type: 'string' }, description: 'bot ids or names, at least one' },
@@ -248,6 +249,7 @@ export function registerTools({ ctx, services, dispatcher, runtime }) {
         notice: STRING('group notice shown to every member, at most 500 characters'),
         reply_mode: { type: 'string', enum: ['admin', 'all'], description: 'admin = only the admin answers first; all = every member gets a turn' },
         max_hops: { type: 'number', description: 'relay hop limit 0..20; 0 means no limit' },
+        max_speakers: { type: 'number', description: 'how many members speak when nobody is @-mentioned (default 3; 0 = everyone; max 20)' },
         handover: BOOLEAN('hand the previous reply conclusion to the next speaker'),
         use_note: BOOLEAN('keep a short group note of what each round concluded'),
         workspaces: {
@@ -269,6 +271,7 @@ export function registerTools({ ctx, services, dispatcher, runtime }) {
           notice: args.notice,
           replyMode: args.reply_mode,
           maxHops: args.max_hops,
+          maxSpeakers: args.max_speakers,
           handover: args.handover,
           useNote: args.use_note,
           workspaces: args.workspaces,
@@ -288,6 +291,7 @@ export function registerTools({ ctx, services, dispatcher, runtime }) {
         notice: STRING('new group notice'),
         reply_mode: { type: 'string', enum: ['admin', 'all'] },
         max_hops: { type: 'number', description: 'relay hop limit 0..20' },
+        max_speakers: { type: 'number', description: 'members who speak without an @-mention (default 3; 0 = everyone; max 20)' },
         handover: BOOLEAN('hand the previous reply conclusion to the next speaker'),
         use_note: BOOLEAN('keep a short group note of what each round concluded'),
         workspaces: {
@@ -311,6 +315,7 @@ export function registerTools({ ctx, services, dispatcher, runtime }) {
         if (args.notice !== undefined) patch.notice = args.notice
         if (args.reply_mode !== undefined) patch.replyMode = args.reply_mode
         if (args.max_hops !== undefined) patch.maxHops = args.max_hops
+        if (args.max_speakers !== undefined) patch.maxSpeakers = args.max_speakers
         if (args.handover !== undefined) patch.handover = args.handover
         if (args.use_note !== undefined) patch.useNote = args.use_note
         if (args.workspaces !== undefined) patch.workspaces = args.workspaces
@@ -340,7 +345,7 @@ export function registerTools({ ctx, services, dispatcher, runtime }) {
     }),
     defineTool({
       name: 'bot_message',
-      description: 'Send one task message to another Bot and wait for its answer. The answer is returned as this tool\'s value; it also appears in that Bot\'s chat.',
+      description: 'Send one task message to another Bot and wait for its answer. Prefer a project group (bot_post_group) for progress, questions, decisions and assignments; use this for one-to-one or sensitive work. The answer is returned as this tool\'s value and also appears in that Bot\'s chat.',
       parameters: schema({
         to: STRING('target bot id or name'),
         message: STRING('what you ask that Bot to do'),
@@ -352,7 +357,7 @@ export function registerTools({ ctx, services, dispatcher, runtime }) {
     }),
     defineTool({
       name: 'bot_post_group',
-      description: 'Ask a group to discuss something. Only callable from a private chat (inside a group you are already in it). The round\'s replies are returned as this tool\'s value.',
+      description: 'Ask a project group to discuss something, mentioning the members you need. This is the preferred channel for project progress, questions, decisions and assignments. Only callable from a private chat (inside a group you are already in it). The round\'s replies are returned as this tool\'s value.',
       parameters: schema({
         group: STRING('group id or name'),
         message: STRING('the discussion request'),
@@ -720,4 +725,6 @@ export function registerTools({ ctx, services, dispatcher, runtime }) {
 
 /** A short announcement the prompt can use, listing exactly the registered names. */
 export const BOT_TOOL_GUIDANCE = TOOL_NAMES.join(', ')
+  + ' 有项目群时，进度/问题/决策/派活优先 bot_post_group 发群并 @ 成员，私聊只做一对一与敏感信息；'
+  + '新建群后先发一条 kickoff（目标/分工/项目目录/验收）。'
   + ' 中文触发：建群 / 拉群 / 改群设置 / 群聊 / 派活 / 定时任务 / 团队记忆。'

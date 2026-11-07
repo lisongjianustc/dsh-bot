@@ -30,7 +30,7 @@
 | **机器人团队** | 名字/角色/instructions/头像/模型/思考档位/权限档位/固定工作区；初启创建 Chief，只有主 Bot 能改团队与群。 |
 | **会话置顶** | 任意会话可置顶（含群聊）；Chief 的私聊首次启动即置顶。 |
 | **私聊** | 每条消息=一次真实 Agent 回合；流式文本、工具行、重试、取消、引用、复制、Markdown。 |
-| **群聊** | `@名字` 指定成员、admin/all 回复模式、`[PASS]` 跳过、接力跳数上限+收敛回合、handover、跨清空的群备注；主 Bot 可建/改/删群并向任意群发言。 |
+| **群聊** | `@成员` 选择器与 `@all`、每轮发言人数上限（`maxSpeakers` 默认 3）+ 路由、群优先协作（工作先发群，私聊只做一对一）、决策自动记入群备注、admin/all 回复模式、`[PASS]` 跳过、接力跳数上限+收敛回合、handover、跨清空的群备注；主 Bot 可建/改/删群并向任意群发言。 |
 | **任务派单** | `bot_dispatch_tasks` / `bot_get_tasks` / `bot_cancel_tasks`：批量后台派单、request_id 幂等、回执、结果回投、取消级联。 |
 | **后台助手** | 隐藏子会话执行不阻塞聊天；结果回投后 Bot 用自己的话验收。 |
 | **记忆** | 每 Bot 一份 + 团队共享一份；每 turn 6000 字预算、revision 校验、journal；支持**自动形成**与待确认队列（见下）。 |
@@ -109,7 +109,7 @@ node scripts/build-client.mjs
 ## 路线图
 
 - [x] 真实会话 Bot、私聊/群聊、记忆、定时、后台助手、用量
-- [x] 群管理工具 + 任务派单（21/21 工具对齐）
+- [x] 群管理工具 + 任务派单（21/21 工具对齐）；群 @ 选择器、发言路由与群优先协作
 - [x] 富输入（图片/文件）、每 Bot 工作区、40 个 SVG 头像库、会话置顶
 - [x] 工具调用详情、右侧文件浏览器/预览、自动记忆（含待确认队列）
 - [ ] 每个 Bot 多会话
@@ -120,8 +120,8 @@ node scripts/build-client.mjs
 
 ```sh
 node scripts/build-client.mjs   # src/client/*.js -> lib/client.js
-node --test test/*.test.js      # 190 个 Host 单测
-node scripts/smoke-client.mjs   # 256 项 Client 自检
+node --test test/*.test.js      # 210 个 Host 单测
+node scripts/smoke-client.mjs   # 290 项 Client 自检
 node scripts/verify-live.mjs http://127.0.0.1:<端口>   # 真实 Host 冒烟
 ```
 
